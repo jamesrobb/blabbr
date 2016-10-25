@@ -23,7 +23,7 @@ Messages consist of a command follow by one or more arguments, pending which com
 
 ### 2.2 Message Interpretation
 
-A client or server MAY disregard any messages that do not conform to the message structured outlined in section [2.1](#2.1-message-structure). A client or server MAY choose to do something with these messages, but it will not be defined in this document, and neither a server nor client should rely on the other to do anything with a invalid message.
+A client or server MAY disregard any messages that do not conform to the message structured outlined in section [2.1](#21-message-structure). A client or server MAY choose to do something with these messages, but it will not be defined in this document, and neither a server nor client should rely on the other to do anything with a invalid message.
 
 
 ## Commands
