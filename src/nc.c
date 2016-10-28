@@ -1,12 +1,12 @@
-#include "chat_ui.h"
-#include "constants.h"
-
 #include <ncursesw/curses.h>
 #include <curses.h>
 #include <locale.h>
 #include <glib.h>
 #include <wchar.h>
 #include <stdlib.h>
+
+#include "chat_ui.h"
+#include "constants.h"
 
 #ifdef UNUSED
 #elif defined(__GNUC__)

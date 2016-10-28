@@ -1,7 +1,7 @@
+#include <wchar.h>
+
 #include "chat_ui.h"
 #include "constants.h"
-
-#include <wchar.h>
 
 void gui_clear_all() {
 	clear();
