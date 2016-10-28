@@ -36,6 +36,10 @@ A client or server MAY disregard any messages that do not conform to the message
 
 ### 3.1 Client Commands
 
+Client commands describe the commands sent by a client to a server. For each command listed, a decription of the command and its arguments are specified. 
+
+Additionally, for each command, the behaviour of the server is described. 
+
 #### 3.1.1 Who Command
 
     who <chat>			       - lists currents users in a chat
