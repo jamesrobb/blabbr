@@ -22,7 +22,9 @@
 #include <fcntl.h>
 #include <wchar.h>
 
+#include "client_connection.h"
 #include "constants.h"
+#include "log.h"
 
 // GLOBAL VARIABLES
 static int exit_fd[2];
@@ -38,12 +40,19 @@ static void initialize_exit_fd(void);
 
 // MAIN
 int main(int argc, char **argv) {
-    struct sockaddr_in server, client;
+
+    // we set a custom logging callback
+    g_log_set_handler (NULL, 
+                       G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
+                       httpd_log_all_handler_cb, 
+                       NULL);
 
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+        g_critical("Usage: %s <port>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    initialize_exit_fd();
 
     // begin setting up the server
     const int master_listen_port = strtol(argv[1], NULL, 10);
@@ -54,10 +63,17 @@ int main(int argc, char **argv) {
     int incoming_sd_max; // max socket (file) descriptor for incoming connections
     fd_set incoming_fds;
     wchar_t data_buffer[TCP_BUFFER_LENGTH];
+    struct sockaddr_in server, client;
     struct sockaddr_in server_addr, client_addr;
     struct timeval select_timeout = {1, 0}; // 1 second
-    //client_connection *clients[MAX_CLIENT_CONNS];
-    //client_connection *working_client_connection; // client connecting we are currently dealing with
+    client_connection *clients[SERVER_MAX_CONN_BACKLOG];
+    client_connection *working_client_connection; // client connecting we are currently dealing with
+
+    // we initialize clients sockect fds
+    for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
+        clients[i] = malloc(sizeof(client_connection));
+        reset_client_connection(clients[i]);
+    }
 
     master_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -103,23 +119,49 @@ int main(int argc, char **argv) {
 
         FD_ZERO(&incoming_fds);
         FD_SET(master_socket, &incoming_fds);
-        incoming_sd_max = master_socket;
+        FD_SET(exit_fd[0], &incoming_fds);
+        incoming_sd_max = exit_fd[0] + 1;
         select_timeout.tv_sec = 1;
-        // for(int i = 0; i < MAX_CLIENT_CONNS; i++) {
+        for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
-        //     working_client_connection = clients[i];
+            working_client_connection = clients[i];
 
-        //     if(working_client_connection->fd > CONN_FREE) {
-        //         FD_SET(working_client_connection->fd, &incoming_fds);
-        //     }
+            if(working_client_connection->fd > CONN_FREE) {
+                FD_SET(working_client_connection->fd, &incoming_fds);
+            }
 
-        //     if(working_client_connection->fd > incoming_sd_max) {
-        //         incoming_sd_max = working_client_connection->fd;
-        //     }
+            if(working_client_connection->fd > incoming_sd_max) {
+                incoming_sd_max = working_client_connection->fd;
+            }
 
-        // }
+        }
 
         select_activity = select(incoming_sd_max + 1, &incoming_fds, NULL, NULL, &select_timeout);
+
+        if (FD_ISSET(exit_fd[0], &incoming_fds)) {
+            // we received a signal!
+            int signum;
+            for (;;) {
+                if (read(exit_fd[0], &signum, sizeof(signum)) == -1) {
+                    if (errno == EAGAIN) {
+                        break;
+                    } else {
+                        perror("read()");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+
+            if (signum == SIGINT) {
+                g_warning("we are exiting");
+                exit(EXIT_SUCCESS);
+            } else if (signum == SIGTERM) {
+                /* Clean-up and exit. */
+                g_warning("sigterm exiting now");
+                break;
+            }
+                    
+        }
 
         // this is done to handle the case where select was not interrupted (ctrl+c) but returned an error.
         if(errno != EINTR && select_activity < 0){
@@ -128,24 +170,23 @@ int main(int argc, char **argv) {
 
         // new incoming connection
         if(FD_ISSET(master_socket, &incoming_fds)) {
-            
             new_socket = accept(master_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_addr_len);
 
             if(new_socket > -1) {
-
                 g_info("new connection on socket fd %d, ip %s, port %d", new_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
                 bool found_socket = FALSE;
-                // for(int i = 0; i < MAX_CLIENT_CONNS; i++) {
+                for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
-                //     if(clients[i]->fd == CONN_FREE) {
-                //         reset_client_connection(clients[i]);
-                //         clients[i]->fd = new_socket;
-                //         found_socket = TRUE;
-                //         break;
-                //     }
+                    if(clients[i]->fd == CONN_FREE) {
+                        reset_client_connection(clients[i]);
+                        clients[i]->fd = new_socket;
+                        found_socket = TRUE;
+                        client_send_welcome(clients[i]);
+                        break;
+                    }
 
-                // }
+                }
 
                 if(found_socket == FALSE) {
                     g_critical("no free client connection slots available, unable to track this connection");
