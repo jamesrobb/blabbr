@@ -126,8 +126,7 @@ int main(int argc, char **argv) {
         } else {
             incoming_sd_max = master_socket + 1;
         }
-        
-        select_timeout.tv_sec = 1;
+
         for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
             working_client_connection = clients[i];
@@ -142,11 +141,13 @@ int main(int argc, char **argv) {
 
         }
 
+        select_timeout.tv_sec = 1;
         select_activity = select(incoming_sd_max + 1, &incoming_fds, NULL, NULL, &select_timeout);
 
+        // do we catch a signal?
         if (FD_ISSET(exit_fd[0], &incoming_fds)) {
-            // we received a signal!
             int signum;
+
             for (;;) {
                 if (read(exit_fd[0], &signum, sizeof(signum)) == -1) {
                     if (errno == EAGAIN) {
@@ -176,6 +177,7 @@ int main(int argc, char **argv) {
 
         // new incoming connection
         if(FD_ISSET(master_socket, &incoming_fds)) {
+            g_info("master socket set");
             new_socket = accept(master_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_addr_len);
 
             if(new_socket > -1) {
