@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -30,6 +33,15 @@
 
 #define NC_UNUSED(x) (void)(x)
 
+// GLOBAL VARIABLES
+static int exit_fd[2];
+
+// FUNCTION DECLERATIONS
+void signal_handler(int signum);
+
+static void initialize_exit_fd(void);
+
+// MAIN
 int main(int argc, char **argv) {
 
 	// for unicode purposes
@@ -39,6 +51,8 @@ int main(int argc, char **argv) {
         g_critical("Usage: %s <port>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    initialize_exit_fd();
 
 	// we define this variable earlier than others for logging purposes
 	GSList *text_area_lines = NULL;
@@ -71,9 +85,10 @@ int main(int argc, char **argv) {
 	
 	int server_fd;
 	int select_activity;
+	int select_timeout_usec = 20000; // 20th of a second
 	const int server_port = strtol(argv[1], NULL, 10);
 	fd_set read_fds;
-	struct timeval select_timeout = {0, 50000}; // 20th of a second
+	struct timeval select_timeout;
 	struct sockaddr_in server;
 
 	// start random numbers
@@ -120,6 +135,7 @@ int main(int argc, char **argv) {
 	input_area_header_win = newwin(1, COLS - SIDEBAR_WIDTH, LINES - 3, 0);
 	input_area_win = newwin(2, COLS - SIDEBAR_WIDTH, LINES - 2, 0);
 	timeout(0);
+	intrflush(stdscr, 1);
 
 	// build the UI
 	if(draw_gui) {
@@ -136,13 +152,46 @@ int main(int argc, char **argv) {
 	wmove(input_area_win, 0, 0);
 	wrefresh(input_area_win);
 
-    // select functionality
-	FD_ZERO(&read_fds);
 
 	while(1 && !exit_main_loop) {
 
+		// select functionality
+		FD_ZERO(&read_fds);
+		FD_SET(exit_fd[0], &read_fds);
 		FD_SET(server_fd, &read_fds);
-		select_activity = select(server_fd + 1, &read_fds, NULL, NULL, &select_timeout);
+		int highest_fd = exit_fd[0] > server_fd ? exit_fd[0] : server_fd;
+		select_timeout.tv_usec = select_timeout_usec;
+		select_activity = select(highest_fd + 1, &read_fds, NULL, NULL, &select_timeout);
+
+		// do we catch a signal?
+		if (FD_ISSET(exit_fd[0], &read_fds)) {
+            int signum;
+
+            for (;;) {
+                if (read(exit_fd[0], &signum, sizeof(signum)) == -1) {
+                    if (errno == EAGAIN) {
+                        break;
+                    } else {
+                        perror("read()");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+
+            if (signum == SIGINT) {
+                
+                g_warning("we are exiting");
+                exit_main_loop = 1;
+                exit_status = EXIT_SUCCESS;
+                break;
+
+            } else if (signum == SIGTERM) {
+                /* Clean-up and exit. */
+                g_warning("sigterm exiting now");
+                break;
+            }
+                    
+        }
 
 		// this is done to handle the case where select was not interrupted (ctrl+c) but returned an error.
         if(errno != EINTR && select_activity < 0){
@@ -188,34 +237,9 @@ int main(int argc, char **argv) {
 
 		gui_create_input_area(input_area_win, &user_input_buffer);
 		wrefresh(input_area_win);
-
-		continue;
-
-		wchar_t *str = g_malloc(sizeof(wint_t) * WCHAR_STR_MAX);
-		wgetn_wstr(input_area_win, (wint_t *) str, WCHAR_STR_MAX);
-
-		g_info("%ls", str);
-
-		if(wcsncmp(quit_command, str, quit_command_len) == 0) {
-			g_free(str);
-			exit_main_loop = 1;
-			break;
-		}
-
-		text_area_lines = g_slist_append(text_area_lines, str);
-		text_area_lines_count++;
-
-		if(text_area_lines_count > BLABBR_LINES_MAX) {
-			g_free(text_area_lines->data);
-			text_area_lines = g_slist_delete_link(text_area_lines, text_area_lines);
-		}
-
-		gui_create_text_area(text_area_win, text_area_lines);
-
-		gui_create_input_area(input_area_win, NULL);
-		wmove(input_area_win, 1, 0);
-		wrefresh(text_area_win);
 	}
+
+	sleep(1);
 
 	// time to cleanup
 	g_slist_free_full(text_area_lines, g_free);
@@ -223,4 +247,64 @@ int main(int argc, char **argv) {
 	exit(exit_status);
 
 	return 0;
+}
+
+// FUNCTION IMPLEMENTATIONS
+void signal_handler(int signum) {
+    int _errno = errno;
+
+    if (write(exit_fd[1], &signum, sizeof(signum)) == -1 && errno != EAGAIN) {
+        abort();
+    }
+
+    fsync(exit_fd[1]);
+    errno = _errno;
+}
+
+void initialize_exit_fd(void) {
+
+    // establish the self pipe for signal handling
+    if (pipe(exit_fd) == -1) {
+        perror("pipe()");
+        exit(EXIT_FAILURE);
+    }
+
+    // make read and write ends of pipe nonblocking
+    int flags;        
+    flags = fcntl(exit_fd[0], F_GETFL);
+    if (flags == -1) {
+        perror("fcntl-F_GETFL");
+        exit(EXIT_FAILURE);
+    }
+    // Make read end nonblocking
+    flags |= O_NONBLOCK;
+    if (fcntl(exit_fd[0], F_SETFL, flags) == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+    flags = fcntl(exit_fd[1], F_GETFL);
+    if (flags == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+    // make write end nonblocking
+    flags |= O_NONBLOCK;
+    if (fcntl(exit_fd[1], F_SETFL, flags) == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+
+    // set the signal handler
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART; // restart interrupted reads
+    sa.sa_handler = signal_handler;
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }       
 }
