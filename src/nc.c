@@ -239,8 +239,6 @@ int main(int argc, char **argv) {
 		wrefresh(input_area_win);
 	}
 
-	sleep(1);
-
 	// time to cleanup
 	g_slist_free_full(text_area_lines, g_free);
 	endwin();
