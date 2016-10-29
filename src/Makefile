@@ -13,6 +13,9 @@ chatd: chatd.o log.o client_connection.o util.o
 getpassword.o: getpassword.c
 	$(CC) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
+line_buffer.o: line_buffer.c
+	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
+
 log.o: log.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
@@ -22,7 +25,7 @@ client_connection.o: client_connection.c
 util.o: util.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
-nc: nc.o chat_ui.o log.o
+nc: nc.o chat_ui.o log.o line_buffer.o
 	$(CC) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) $(shell ncursesw5-config --libs) -lm
 
 chat_ui.o: chat_ui.c
