@@ -31,6 +31,11 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	// for unicode purposes
 	setlocale(LC_ALL, "");
 
+	if (argc != 2) {
+        g_critical("Usage: %s <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
 	// we define this variable earlier than others for logging purposes
 	GSList *text_area_lines = NULL;
 	GSList **text_area_lines_ref = &text_area_lines;
@@ -48,6 +53,9 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	WINDOW *text_area_win;
 	WINDOW *input_area_win;
 
+	int exit_main_loop = 0;
+	int exit_status = EXIT_SUCCESS;
+
 	short origf, origb;
 	int draw_gui = 1;
 	int text_area_lines_count = 0;
@@ -56,7 +64,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	size_t quit_command_len = wcslen(quit_command);
 	
 	int server_fd;
-	int local_port;
+	const int server_port = strtol(argv[1], NULL, 10);
 	fd_set read_fds;
 	struct sockaddr_in server;
 
@@ -82,10 +90,20 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
     inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
-    local_port = 32000 + (rand() % 30);
-    server.sin_port = htons(local_port);
+    server.sin_port = htons(server_port);
 
-    g_info("local port for server connection: %d", local_port);
+    int connect_res = connect(server_fd, (struct sockaddr *) &server, sizeof(server));
+    if (connect_res == -1) {
+        g_critical("connecting to server failed");
+        exit_main_loop = 1;
+        exit_status = EXIT_FAILURE;
+    }
+
+    wchar_t harro_msg[] = L"harro server";
+    int send_res = send(server_fd, harro_msg, wcslen(harro_msg), 0);
+    g_info("%d", send_res);
+
+    g_info("server port for server connection: %d", server_port);
 
 	// create UI windows
 	header_win = newwin(1, COLS, 0, 0);
@@ -110,13 +128,14 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
     // select functionality
 	FD_ZERO(&read_fds);
 
-	while(1) {
+	while(1 && !exit_main_loop) {
 
 		wchar_t *str = g_malloc(sizeof(wint_t) * WCHAR_STR_MAX);
 		wgetn_wstr(input_area_win, (wint_t *) str, WCHAR_STR_MAX);
 
 		if(wcsncmp(quit_command, str, quit_command_len) == 0) {
 			g_free(str);
+			exit_main_loop = 1;
 			break;
 		}
 
@@ -135,10 +154,10 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 		wrefresh(text_area_win);
 	}
 
-
 	// time to cleanup
 	g_slist_free_full(text_area_lines, g_free);
 	endwin();
+	exit(exit_status);
 
 	return 0;
 }

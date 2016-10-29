@@ -7,7 +7,7 @@ all: chatd chat
 chat: chat.o getpasswd.o
 	$(CC) $(CFLAGS) -o $@ $^ -lreadline $(shell pkg-config glib-2.0 openssl --libs)
 
-chatd: chatd.o log.o client_connection.o
+chatd: chatd.o log.o client_connection.o util.o
 	$(CC) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
 getpassword.o: getpassword.c

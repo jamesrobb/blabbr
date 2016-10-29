@@ -120,7 +120,13 @@ int main(int argc, char **argv) {
         FD_ZERO(&incoming_fds);
         FD_SET(master_socket, &incoming_fds);
         FD_SET(exit_fd[0], &incoming_fds);
-        incoming_sd_max = exit_fd[0] + 1;
+
+        if(exit_fd[0] > master_socket) {
+            incoming_sd_max = exit_fd[0] + 1;
+        } else {
+            incoming_sd_max = master_socket + 1;
+        }
+        
         select_timeout.tv_sec = 1;
         for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
