@@ -1,14 +1,15 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <string.h>
+#include <wchar.h>
 
 #include "client_connection.h"
 #include "util.h"
 
 void client_send_welcome(client_connection *client) {
 
-	gchar* welcome = "Welcome to Blabbr! Please authenticate.";
-	int welcome_len = gchar_array_len(welcome);
+	wchar_t *welcome = L"Welcome to Blabbr! Please authenticate.";
+	int welcome_len = 40 * sizeof(wchar_t);
 	int client_addr_len;
 	struct sockaddr_in client_addr;
 
