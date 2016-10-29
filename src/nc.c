@@ -4,9 +4,16 @@
 #include <glib.h>
 #include <wchar.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include "chat_ui.h"
 #include "constants.h"
+#include "log.h"
 
 #ifdef UNUSED
 #elif defined(__GNUC__)
@@ -20,8 +27,21 @@
 #define NC_UNUSED(x) (void)(x)
 
 int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) {
+
 	// for unicode purposes
 	setlocale(LC_ALL, "");
+
+	// we define this variable earlier than others for logging purposes
+	GSList *text_area_lines = NULL;
+	GSList **text_area_lines_ref = &text_area_lines;
+	// wchar_t initial[] = L"INITIAL";
+	// text_area_lines = g_slist_append(text_area_lines, initial);
+
+	// we set a custom logging callback
+    g_log_set_handler (NULL, 
+                       G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
+                       client_log_all_handler_cb, 
+                       text_area_lines_ref);
 
 	WINDOW *header_win;
 	WINDOW *sidebar_win;
@@ -31,11 +51,17 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	short origf, origb;
 	int draw_gui = 1;
 	int text_area_lines_count = 0;
-
-	GSList *text_area_lines = NULL;
-
+	
 	wchar_t quit_command[] = L"/quit";
 	size_t quit_command_len = wcslen(quit_command);
+	
+	int server_fd;
+	int local_port;
+	fd_set read_fds;
+	struct sockaddr_in server;
+
+	// start random numbers
+	srand(time(NULL));
 
 	// set configuration for UI
 	initscr();
@@ -49,7 +75,17 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	init_pair(HEADER_BG_PAIR, COLOR_GREEN, COLOR_GREEN);
 	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
 	//noecho();
-	keypad(stdscr, TRUE);	
+	keypad(stdscr, TRUE);
+
+	// time to establish a connection
+	server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	memset(&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+    local_port = 32000 + (rand() % 30);
+    server.sin_port = htons(local_port);
+
+    g_info("local port for server connection: %d", local_port);
 
 	// create UI windows
 	header_win = newwin(1, COLS, 0, 0);
@@ -70,6 +106,9 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char **argv) 
 	// move the cursor into the start of the input area
 	wmove(input_area_win, 1, 0);
 	wrefresh(input_area_win);
+
+    // select functionality
+	FD_ZERO(&read_fds);
 
 	while(1) {
 
