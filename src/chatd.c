@@ -22,12 +22,20 @@
 #include <fcntl.h>
 #include <wchar.h>
 
+// open ssl headers
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+
 #include "client_connection.h"
 #include "constants.h"
 #include "log.h"
 
 // GLOBAL VARIABLES
 static int exit_fd[2];
+
+#define  SERVER_CERT            "./blabbr.crt"
+#define  SERVER_PKEY            "./blabbr.key"
 
 // FUNCTION DECLERATIONS
 int sockaddr_in_cmp(const void *addr1, const void *addr2);
@@ -37,6 +45,11 @@ gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data);
 void signal_handler(int signum);
 
 static void initialize_exit_fd(void);
+
+int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata) {
+    memcpy(buf, "blabbr", 6);
+    return 6;
+}
 
 // MAIN
 int main(int argc, char **argv) {
@@ -54,6 +67,24 @@ int main(int argc, char **argv) {
 
     initialize_exit_fd();
 
+    // begin setting up SSL
+    SSL_library_init(); // loads encryption and hash algs for SSL
+    SSL_load_error_strings(); // loads error strings for error reporting
+
+    const SSL_METHOD *ssl_method = SSLv23_server_method();
+    SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
+    SSL_CTX_set_default_passwd_cb(ssl_ctx, pem_passwd_cb);
+
+    if (SSL_CTX_use_certificate_file(ssl_ctx, SERVER_CERT, SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    if(SSL_CTX_use_RSAPrivateKey_file(ssl_ctx, SERVER_PKEY, SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
     // begin setting up the server
     const int master_listen_port = strtol(argv[1], NULL, 10);
     int master_socket;
@@ -68,11 +99,12 @@ int main(int argc, char **argv) {
     struct timeval select_timeout = {1, 0}; // 1 second
     client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
+    //BIO *master_bio;
 
     // we initialize clients sockect fds
     for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
         clients[i] = malloc(sizeof(client_connection));
-        reset_client_connection(clients[i]);
+        client_connection_init(clients[i]);
     }
 
     master_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -107,6 +139,12 @@ int main(int argc, char **argv) {
         g_string_free(listen_error, TRUE);
         exit(1);
     }
+
+    // setup BIO for master_socket
+    //master_bio = BIO_new(BIO_s_socket());
+    //BIO_set_nbio(master_bio, 1);
+    // BIO_set_fd(master_bio, master_socket, BIO_NOCLOSE);
+    // SSL_set_bio(ssl, master_bio, master_bio);
 
     while (TRUE) {
 
@@ -181,16 +219,77 @@ int main(int argc, char **argv) {
             new_socket = accept(master_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_addr_len);
 
             if(new_socket > -1) {
+
+                g_info("master socket created new fd for connecting client");
+
                 g_info("new connection on socket fd %d, ip %s, port %d", new_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
                 bool found_socket = FALSE;
                 for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
                     if(clients[i]->fd == CONN_FREE) {
-                        reset_client_connection(clients[i]);
+
+                        g_info("free client slot found");
+
+                        SSL *new_ssl = SSL_new(ssl_ctx);
+                        SSL_set_fd(new_ssl, new_socket);
+
+                        clients[i]->ssl = new_ssl;
+                        clients[i]->bio_ssl = BIO_new(BIO_s_socket());
+                        BIO_set_fd(clients[i]->bio_ssl, new_socket, BIO_NOCLOSE);
+                        SSL_set_bio(new_ssl, clients[i]->bio_ssl, clients[i]->bio_ssl);
+
+                        int ssl_status = SSL_accept(new_ssl);
+
+                        if(ssl_status <= 0) {
+
+                            switch(ssl_status) {
+                                case SSL_ERROR_NONE:
+                                    g_info("SSL_ERROR_NONE");
+                                    break;
+                                case SSL_ERROR_ZERO_RETURN:
+                                    g_info("SSL_ERROR_ZERO_RETURN");
+                                    break;
+                                case SSL_ERROR_WANT_READ:
+                                    g_info("SSL_ERROR_WANT_READ");
+                                    break;
+                                case SSL_ERROR_WANT_WRITE:
+                                    g_info("SSL_ERROR_WANT_WRITE");
+                                    break;
+                                case SSL_ERROR_WANT_CONNECT:
+                                    g_info("SSL_ERROR_WANT_CONNECT");
+                                    break;
+                                case SSL_ERROR_WANT_ACCEPT:
+                                    g_info("SSL_ERROR_WANT_ACCEPT");
+                                    break;
+                                case SSL_ERROR_WANT_X509_LOOKUP:
+                                    g_info("SSL_ERROR_WANT_X509_LOOKUP");
+                                    break;
+                                case SSL_ERROR_SYSCALL:
+                                    g_info("SSL_ERROR_SYSCALL");
+                                    break;
+                                case SSL_ERROR_SSL:
+                                    g_info("SSL_ERROR_SSL");
+                                    break;
+                                default:
+                                    ERR_print_errors_fp(stdout);
+                                    g_info("SOME OTHER SSL PROBLEM %d", ssl_status);
+                                    break;
+                            }
+
+                        }
+
+                        clients[i]->ssl_connected = (ssl_status == 1 ? TRUE : FALSE);
+                        //client_connection_reset(clients[i]);
                         clients[i]->fd = new_socket;
                         found_socket = TRUE;
-                        client_send_welcome(clients[i]);
+
+
+                        if(clients[i]->ssl_connected) {
+                            g_info("sending welcome message");
+                            client_send_welcome(clients[i]);
+                        }
+
                         break;
                     }
 
@@ -208,6 +307,12 @@ int main(int argc, char **argv) {
             }
         }
 
+    }
+
+    //BIO_vfree(master_bio);
+    SSL_CTX_free(ssl_ctx);
+    for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
+        client_connection_reset(clients[i]);
     }
 
     exit(EXIT_SUCCESS);

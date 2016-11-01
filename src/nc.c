@@ -15,7 +15,11 @@
 #include <sys/time.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <readline/readline.h>
+
+// open ssl headers
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
 
 #include "chat_ui.h"
 #include "constants.h"
@@ -58,12 +62,13 @@ int main(int argc, char **argv) {
 	GSList *text_area_lines = NULL;
 	GSList **text_area_lines_ref = &text_area_lines;
 
-	// we set a custom logging callback
+	//we set a custom logging callback
     g_log_set_handler (NULL, 
                        G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
                        client_log_all_handler_cb, 
                        text_area_lines_ref);
 
+    // gui variables
 	WINDOW *header_win;
 	WINDOW *sidebar_win;
 	WINDOW *text_area_win;
@@ -83,30 +88,18 @@ int main(int argc, char **argv) {
 	struct input_buffer user_input_buffer;
 	line_buffer_make(&user_input_buffer);
 	
+	// server variables
 	int server_fd;
 	int select_activity;
 	int select_timeout_usec = 20000; // 20th of a second
 	const int server_port = strtol(argv[1], NULL, 10);
+	int ssl_error;
 	fd_set read_fds;
 	struct timeval select_timeout;
 	struct sockaddr_in server;
 
 	// start random numbers
 	srand(time(NULL));
-
-	// set configuration for UI
-	initscr();
-	cbreak();
-	//curs_set(0);
-	start_color();
-	use_default_colors();
-	pair_content(0, &origf, &origb);
-	init_pair(1, COLOR_GREEN, origb);
-	init_pair(WARNING_PAIR, COLOR_RED, origb);
-	init_pair(HEADER_BG_PAIR, COLOR_GREEN, COLOR_GREEN);
-	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
-	noecho();
-	keypad(stdscr, TRUE);
 
 	// time to establish a connection
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -121,12 +114,76 @@ int main(int argc, char **argv) {
         exit_main_loop = 1;
         exit_status = EXIT_FAILURE;
     }
-
-    // wchar_t harro_msg[] = L"harro server";
-    // int send_res = send(server_fd, harro_msg, wcslen(harro_msg), 0);
-    // //g_info("%d", send_res);
-
     g_info("server port for server connection: %d", server_port);
+
+    // begin setting up SSL
+    SSL_library_init(); // loads encryption and hash algs for SSL
+    SSL_load_error_strings(); // loads error strings for error reporting
+
+    const SSL_METHOD *ssl_method = SSLv23_client_method();
+    SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
+    SSL *ssl = SSL_new(ssl_ctx);
+    SSL_set_fd(ssl, server_fd);
+
+    // we create the BIO for the server connection
+    BIO *server_bio = BIO_new(BIO_s_socket());
+    BIO_set_fd(server_bio, server_fd, BIO_NOCLOSE);
+    SSL_set_bio(ssl, server_bio, server_bio);
+
+    ssl_error = SSL_connect(ssl);
+
+    if(ssl_error != 1) {
+    	g_warning("could not establish ssl connection");
+
+        switch(ssl_error) {
+            case SSL_ERROR_NONE:
+                g_warning("SSL_ERROR_NONE");
+                break;
+            case SSL_ERROR_ZERO_RETURN:
+                g_warning("SSL_ERROR_ZERO_RETURN");
+                break;
+            case SSL_ERROR_WANT_READ:
+                g_warning("SSL_ERROR_WANT_READ");
+                break;
+            case SSL_ERROR_WANT_WRITE:
+                g_warning("SSL_ERROR_WANT_WRITE");
+                break;
+            case SSL_ERROR_WANT_CONNECT:
+                g_warning("SSL_ERROR_WANT_CONNECT");
+                break;
+            case SSL_ERROR_WANT_ACCEPT:
+                g_warning("SSL_ERROR_WANT_ACCEPT");
+                break;
+            case SSL_ERROR_WANT_X509_LOOKUP:
+                g_warning("SSL_ERROR_WANT_X509_LOOKUP");
+                break;
+            case SSL_ERROR_SYSCALL:
+                g_warning("SSL_ERROR_SYSCALL");
+                break;
+            case SSL_ERROR_SSL:
+                g_warning("SSL_ERROR_SSL");
+                break;
+            default:
+                g_warning("SOME OTHER SSL PROBLEM %d", ssl_error);
+                break;
+        }
+
+    	exit(EXIT_FAILURE);
+    }
+
+    // set configuration for UI
+	initscr();
+	cbreak();
+	//curs_set(0);
+	start_color();
+	use_default_colors();
+	pair_content(0, &origf, &origb);
+	init_pair(1, COLOR_GREEN, origb);
+	init_pair(WARNING_PAIR, COLOR_RED, origb);
+	init_pair(HEADER_BG_PAIR, COLOR_GREEN, COLOR_GREEN);
+	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
+	noecho();
+	keypad(stdscr, TRUE);
 
 	// create UI windows
 	header_win = newwin(1, COLS, 0, 0);
@@ -152,14 +209,17 @@ int main(int argc, char **argv) {
 	wmove(input_area_win, 0, 0);
 	wrefresh(input_area_win);
 
+	BIO_set_nbio(server_bio, 1);
 
 	while(1 && !exit_main_loop) {
 
 		// select functionality
+		int server_bio_fd = BIO_get_fd(server_bio, NULL);
+		int highest_fd = exit_fd[0] > server_bio_fd ? exit_fd[0] : server_bio_fd;
 		FD_ZERO(&read_fds);
 		FD_SET(exit_fd[0], &read_fds);
-		FD_SET(server_fd, &read_fds);
-		int highest_fd = exit_fd[0] > server_fd ? exit_fd[0] : server_fd;
+		FD_SET(server_bio_fd, &read_fds);
+		select_timeout.tv_sec = 0;
 		select_timeout.tv_usec = select_timeout_usec;
 		select_activity = select(highest_fd + 1, &read_fds, NULL, NULL, &select_timeout);
 
@@ -198,10 +258,11 @@ int main(int argc, char **argv) {
             g_warning("select() error");
         }
 
-		if(FD_ISSET(server_fd, &read_fds)) {
+		if(FD_ISSET(server_bio_fd, &read_fds)) {
 
 			wchar_t *recv_message = g_malloc(WCHAR_STR_MAX * sizeof(wchar_t));
-			ssize_t recv_len = recv(server_fd, recv_message, WCHAR_STR_MAX - 1, 0);
+			int recv_len = SSL_read(ssl, recv_message, WCHAR_STR_MAX - 1);
+			//ssize_t recv_len = recv(server_fd, recv_message, WCHAR_STR_MAX - 1, 0);
 
 			recv_message[recv_len+1] = '\0';
 			text_area_lines = g_slist_append(text_area_lines, recv_message);
@@ -240,6 +301,9 @@ int main(int argc, char **argv) {
 	}
 
 	// time to cleanup
+	//BIO_vfree(server_bio);
+	SSL_free(ssl);
+	SSL_CTX_free(ssl_ctx);
 	g_slist_free_full(text_area_lines, g_free);
 	endwin();
 	exit(exit_status);

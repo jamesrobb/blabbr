@@ -13,7 +13,12 @@ void client_send_welcome(client_connection *client) {
 	int client_addr_len;
 	struct sockaddr_in client_addr;
 
-	if(send(client->fd, welcome, welcome_len, 0) != (int) welcome_len) {
+	int bio_sent = SSL_write(client->ssl, welcome, welcome_len);
+
+	g_info("bio sent is %d", bio_sent);
+
+	if(bio_sent != (int) welcome_len) {
+	// if(send(client->fd, welcome, welcome_len, 0) != (int) welcome_len) {
 
 		memset(&client_addr, 0, sizeof(client_addr));
 		getpeername(client->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
@@ -26,11 +31,31 @@ void client_send_welcome(client_connection *client) {
 
 }
 
-void reset_client_connection(client_connection *client) {
+void client_connection_init(client_connection *client) {
+	client->last_activity = time(NULL);
+    client->fd = CONN_FREE;
+    client->close = FALSE;
+    client->authenticated = FALSE;
+    client->ssl_connected = FALSE;
+    client->bio_ssl = NULL;
+    client->ssl = NULL;
+    client->username = NULL;
+}
+
+void client_connection_reset(client_connection *client) {
     client->last_activity = time(NULL);
     client->fd = CONN_FREE;
     client->close = FALSE;
     client->authenticated = FALSE;
+    client->ssl_connected = FALSE;
+
+    // if(client->bio != NULL) {
+    // 	BIO_vfree(client->bio);
+    // }
+
+    if(client->ssl != NULL) {
+    	SSL_free(client->ssl);
+    }
 
     if(client->username != NULL) {
     	g_free(client->username);
