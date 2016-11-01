@@ -24,8 +24,6 @@ int line_buffer_get_line_non_blocking(struct input_buffer *buffer, wchar_t *targ
 
     }
 
-    g_info("linebuffer past true");
-
 }
 
 int line_buffer_handle_input(struct input_buffer *buffer, wchar_t *target, int max_len, wint_t key, int ch_ret) {
@@ -83,11 +81,7 @@ void line_buffer_add_char(struct input_buffer *buffer, wchar_t ch) {
         buffer->ln = nln;
         //buffer->capacity = ncap / sizeof(wchar_t);
         buffer->capacity += 128;
-
-        g_info("buffer resize");
     }
-
-    g_info("buffer %d capacity %d", buffer->length, buffer->capacity);
 
     // Add new character
     memmove(
