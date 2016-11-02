@@ -46,6 +46,8 @@ void signal_handler(int signum);
 
 static void initialize_exit_fd(void);
 
+void text_area_append(GSList **text_area_lines_ref, wchar_t *message, int *text_area_lines_count, int *draw_text_area);
+
 // MAIN
 int main(int argc, char **argv) {
 
@@ -85,7 +87,9 @@ int main(int argc, char **argv) {
 	int text_area_lines_count = 0;
 	
 	wchar_t quit_command[] = L"/quit";
+	wchar_t register_command[] = L"/register";
 	size_t quit_command_len = wcslen(quit_command);
+	size_t register_command_len = wcslen(register_command);
 	struct input_buffer user_input_buffer;
 	line_buffer_make(&user_input_buffer);
 	
@@ -247,14 +251,56 @@ int main(int argc, char **argv) {
 			if(wcsncmp(quit_command, user_line, quit_command_len) == 0) {
 				exit_main_loop = 1;
 				break;
+
+			} else if (wcsncmp(register_command, user_line, register_command_len) == 0) {
+
+				gui_create_input_area(input_area_win, NULL);
+				wrefresh(input_area_win);
+
+				wchar_t *state;
+				wchar_t *token = wcstok(user_line, L" ", &state);
+				int tokens = 0;
+				gboolean register_command_error = FALSE;
+
+				while(token != NULL) {
+
+					if(tokens >= 2) {
+						register_command_error = TRUE;
+						break;
+					}
+
+					token = wcstok(NULL, L" ", &state);
+					tokens++;
+
+					if(tokens == 2) {
+
+						wint_t password[50];
+						wget_wstr(input_area_win, password);
+						password[49] = '\0';
+
+					}
+				}
+
+				if(register_command_error) {
+
+					wchar_t *register_error_message = g_malloc(sizeof(wchar_t) * 28);
+					mbstowcs(register_error_message, "Invalid registration command", 28);
+
+					text_area_append(text_area_lines_ref, register_error_message, &text_area_lines_count, &draw_text_area);
+
+				}
+
+			} else {
+
+				wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
+				memcpy(str, user_line, user_line_len * sizeof(wchar_t));
+
+				text_area_lines = g_slist_append(text_area_lines, str);
+				text_area_lines_count++;
+				draw_text_area = 1;
+
 			}
 
-			wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
-			memcpy(str, user_line, user_line_len * sizeof(wchar_t));
-
-			text_area_lines = g_slist_append(text_area_lines, str);
-			text_area_lines_count++;
-			draw_text_area = 1;
 		}
 
 		if(draw_text_area) {
@@ -336,4 +382,12 @@ void initialize_exit_fd(void) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }       
+}
+
+void text_area_append(GSList **text_area_lines_ref, wchar_t* message, int *text_area_lines_count, int *draw_text_area) {
+
+	(*text_area_lines_ref) = g_slist_append(*text_area_lines_ref, message);
+	(*text_area_lines_count)++;
+	(*draw_text_area) = 1;
+
 }
