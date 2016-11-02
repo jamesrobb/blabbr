@@ -30,6 +30,7 @@
 #include "client_connection.h"
 #include "constants.h"
 #include "log.h"
+#include "util.h"
 
 // GLOBAL VARIABLES
 static int exit_fd[2];
@@ -46,10 +47,7 @@ void signal_handler(int signum);
 
 static void initialize_exit_fd(void);
 
-int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata) {
-    memcpy(buf, "blabbr", 6);
-    return 6;
-}
+int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata);
 
 // MAIN
 int main(int argc, char **argv) {
@@ -94,7 +92,6 @@ int main(int argc, char **argv) {
     int incoming_sd_max; // max socket (file) descriptor for incoming connections
     fd_set incoming_fds;
     wchar_t data_buffer[TCP_BUFFER_LENGTH];
-    struct sockaddr_in server, client;
     struct sockaddr_in server_addr, client_addr;
     struct timeval select_timeout = {1, 0}; // 1 second
     client_connection *clients[SERVER_MAX_CONN_BACKLOG];
@@ -140,12 +137,6 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    // setup BIO for master_socket
-    //master_bio = BIO_new(BIO_s_socket());
-    //BIO_set_nbio(master_bio, 1);
-    // BIO_set_fd(master_bio, master_socket, BIO_NOCLOSE);
-    // SSL_set_bio(ssl, master_bio, master_bio);
-
     while (TRUE) {
 
         // zero out client address info and data buffer
@@ -186,7 +177,7 @@ int main(int argc, char **argv) {
         if (FD_ISSET(exit_fd[0], &incoming_fds)) {
             int signum;
 
-            for (;;) {
+            while(TRUE) {
                 if (read(exit_fd[0], &signum, sizeof(signum)) == -1) {
                     if (errno == EAGAIN) {
                         break;
@@ -215,24 +206,21 @@ int main(int argc, char **argv) {
 
         // new incoming connection
         if(FD_ISSET(master_socket, &incoming_fds)) {
-            g_info("master socket set");
+            g_info("master socket ISSET");
             new_socket = accept(master_socket, (struct sockaddr *)&client_addr, (socklen_t*)&client_addr_len);
 
             if(new_socket > -1) {
 
-                g_info("master socket created new fd for connecting client");
-
-                g_info("new connection on socket fd %d, ip %s, port %d", new_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                g_info("new connection on socket fd %d, ip %s:%d", new_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
                 bool found_socket = FALSE;
                 for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
 
                     if(clients[i]->fd == CONN_FREE) {
 
-                        g_info("free client slot found");
+                        //client_connection_reset(clients[i]);
 
                         SSL *new_ssl = SSL_new(ssl_ctx);
-                        SSL_set_fd(new_ssl, new_socket);
 
                         clients[i]->ssl = new_ssl;
                         clients[i]->bio_ssl = BIO_new(BIO_s_socket());
@@ -242,51 +230,16 @@ int main(int argc, char **argv) {
                         int ssl_status = SSL_accept(new_ssl);
 
                         if(ssl_status <= 0) {
-
-                            switch(ssl_status) {
-                                case SSL_ERROR_NONE:
-                                    g_info("SSL_ERROR_NONE");
-                                    break;
-                                case SSL_ERROR_ZERO_RETURN:
-                                    g_info("SSL_ERROR_ZERO_RETURN");
-                                    break;
-                                case SSL_ERROR_WANT_READ:
-                                    g_info("SSL_ERROR_WANT_READ");
-                                    break;
-                                case SSL_ERROR_WANT_WRITE:
-                                    g_info("SSL_ERROR_WANT_WRITE");
-                                    break;
-                                case SSL_ERROR_WANT_CONNECT:
-                                    g_info("SSL_ERROR_WANT_CONNECT");
-                                    break;
-                                case SSL_ERROR_WANT_ACCEPT:
-                                    g_info("SSL_ERROR_WANT_ACCEPT");
-                                    break;
-                                case SSL_ERROR_WANT_X509_LOOKUP:
-                                    g_info("SSL_ERROR_WANT_X509_LOOKUP");
-                                    break;
-                                case SSL_ERROR_SYSCALL:
-                                    g_info("SSL_ERROR_SYSCALL");
-                                    break;
-                                case SSL_ERROR_SSL:
-                                    g_info("SSL_ERROR_SSL");
-                                    break;
-                                default:
-                                    ERR_print_errors_fp(stdout);
-                                    g_info("SOME OTHER SSL PROBLEM %d", ssl_status);
-                                    break;
-                            }
-
+                            ssl_print_error(ssl_status);
                         }
 
                         clients[i]->ssl_connected = (ssl_status == 1 ? TRUE : FALSE);
-                        //client_connection_reset(clients[i]);
                         clients[i]->fd = new_socket;
                         found_socket = TRUE;
 
 
                         if(clients[i]->ssl_connected) {
-                            g_info("sending welcome message");
+                            g_info("sending welcome message to %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
                             client_send_welcome(clients[i]);
                         }
 
@@ -405,8 +358,15 @@ void initialize_exit_fd(void) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }
+
     if (sigaction(SIGTERM, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
-    }       
+    }
+
+}
+
+int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata) {
+    memcpy(buf, "blabbr", 6);
+    return 6;
 }

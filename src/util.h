@@ -21,4 +21,6 @@ void gdateweekday_to_gstring(GDateWeekday day, GString *name);
 
 void gdatemonth_to_gstring(GDateMonth mon, GString *name);
 
+void ssl_print_error(int ssl_error);
+
 #endif

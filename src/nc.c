@@ -25,6 +25,7 @@
 #include "constants.h"
 #include "line_buffer.h"
 #include "log.h"
+#include "util.h"
 
 #ifdef UNUSED
 #elif defined(__GNUC__)
@@ -133,41 +134,7 @@ int main(int argc, char **argv) {
     ssl_error = SSL_connect(ssl);
 
     if(ssl_error != 1) {
-    	g_warning("could not establish ssl connection");
-
-        switch(ssl_error) {
-            case SSL_ERROR_NONE:
-                g_warning("SSL_ERROR_NONE");
-                break;
-            case SSL_ERROR_ZERO_RETURN:
-                g_warning("SSL_ERROR_ZERO_RETURN");
-                break;
-            case SSL_ERROR_WANT_READ:
-                g_warning("SSL_ERROR_WANT_READ");
-                break;
-            case SSL_ERROR_WANT_WRITE:
-                g_warning("SSL_ERROR_WANT_WRITE");
-                break;
-            case SSL_ERROR_WANT_CONNECT:
-                g_warning("SSL_ERROR_WANT_CONNECT");
-                break;
-            case SSL_ERROR_WANT_ACCEPT:
-                g_warning("SSL_ERROR_WANT_ACCEPT");
-                break;
-            case SSL_ERROR_WANT_X509_LOOKUP:
-                g_warning("SSL_ERROR_WANT_X509_LOOKUP");
-                break;
-            case SSL_ERROR_SYSCALL:
-                g_warning("SSL_ERROR_SYSCALL");
-                break;
-            case SSL_ERROR_SSL:
-                g_warning("SSL_ERROR_SSL");
-                break;
-            default:
-                g_warning("SOME OTHER SSL PROBLEM %d", ssl_error);
-                break;
-        }
-
+    	ssl_print_error(ssl_error);
     	exit(EXIT_FAILURE);
     }
 

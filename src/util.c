@@ -1,3 +1,8 @@
+// open ssl headers
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+
 #include "util.h"
 
 void gdateweekday_to_gstring(GDateWeekday day, GString *name) {
@@ -121,4 +126,42 @@ void gchar_char_strip(gchar *destination, gchar* source, gchar strip_char) {
 			destpos++;
 		}
 	}
+}
+
+void ssl_print_error(int ssl_error) {
+
+	switch(ssl_error) {
+        case SSL_ERROR_NONE:
+            g_info("SSL_ERROR_NONE");
+            break;
+        case SSL_ERROR_ZERO_RETURN:
+            g_info("SSL_ERROR_ZERO_RETURN");
+            break;
+        case SSL_ERROR_WANT_READ:
+            g_info("SSL_ERROR_WANT_READ");
+            break;
+        case SSL_ERROR_WANT_WRITE:
+            g_info("SSL_ERROR_WANT_WRITE");
+            break;
+        case SSL_ERROR_WANT_CONNECT:
+            g_info("SSL_ERROR_WANT_CONNECT");
+            break;
+        case SSL_ERROR_WANT_ACCEPT:
+            g_info("SSL_ERROR_WANT_ACCEPT");
+            break;
+        case SSL_ERROR_WANT_X509_LOOKUP:
+            g_info("SSL_ERROR_WANT_X509_LOOKUP");
+            break;
+        case SSL_ERROR_SYSCALL:
+            g_info("SSL_ERROR_SYSCALL");
+            break;
+        case SSL_ERROR_SSL:
+            g_info("SSL_ERROR_SSL");
+            break;
+        default:
+            ERR_print_errors_fp(stdout);
+            g_info("SOME OTHER SSL PROBLEM %d", ssl_error);
+            break;
+    }
+
 }

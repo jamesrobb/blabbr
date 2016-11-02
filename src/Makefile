@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -std=gnu11 -O2 -g -Wall -Wextra -Wformat=2 $(shell pkg-config glib-2.0 openssl --cflags) $(shell ncursesw5-config --cflags)
 OBJFLAGS = -c
 
-all: chatd chat
+all: chatd nc
 
 chat: chat.o getpasswd.o
 	$(CC) $(CFLAGS) -o $@ $^ -lreadline $(shell pkg-config glib-2.0 openssl --libs)
@@ -25,7 +25,7 @@ client_connection.o: client_connection.c
 util.o: util.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
-nc: nc.o chat_ui.o log.o line_buffer.o
+nc: nc.o chat_ui.o log.o line_buffer.o util.o
 	$(CC) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) $(shell ncursesw5-config --libs) -lm
 
 chat_ui.o: chat_ui.c
