@@ -43,7 +43,7 @@ void httpd_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 	// print log message out to screen
 	g_print("%s", error_string->str);
 
-	write_to_log_file(ACCESS_LOG_FILE_LOCATION, error_string);
+	write_to_log_file(SERVER_DEBUG_LOG_FILE_LOCATION, error_string);
 
 	g_date_time_unref(now);
 	g_string_free(error_string, TRUE);
@@ -62,7 +62,7 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 	// format a log message given the current time and log messaged passed to this function
 	GString *error_string = g_string_new(NULL);
 	g_string_printf(error_string,
-					"%02d-%02d-%02dT%02d:%02d:%02dZ %s: %s \n", 
+					"%02d-%02d-%02dT%02d:%02d:%02dZ %s: %s", 
 					g_date_time_get_year(now),
 					g_date_time_get_month(now),
 					g_date_time_get_day_of_month(now),
@@ -72,12 +72,14 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 					log_level_to_string(log_level), 
 					message);
 
+
 	// we add log message to text area
-	wchar_t *w_error = malloc(sizeof(wchar_t) * error_string->len);
-	mbstowcs(w_error, error_string->str, error_string->len-1);
+	wchar_t *w_error = malloc(sizeof(wchar_t) * (error_string->len + 1));
+	mbstowcs(w_error, error_string->str, error_string->len + 1);
 	GSList **text_area_lines = (GSList **)user_data;
 	*text_area_lines = g_slist_append(*text_area_lines, w_error);
 
+	g_string_append(error_string, "\n");
 	write_to_log_file(CLIENT_DEBUG_LOG_FILE_LOCATION, error_string);
 
 	g_date_time_unref(now);
@@ -86,12 +88,9 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 	return;
 }
 
-void httpd_log_access(gchar *client_ip,
+void server_log_access(gchar *client_ip,
 					  int client_port, 
-					  gchar *req_method,
-					  gchar *host_name,
-					  gchar* uri, 
-					  gchar *response_code) {
+					  gchar *message) {
 
 	// we get the current time
 	GDateTime *now = g_date_time_new_now_utc();
@@ -99,7 +98,7 @@ void httpd_log_access(gchar *client_ip,
 	// format a log message given the current time and log messaged passed to this function
 	GString *access_string = g_string_new(NULL);
 	g_string_printf(access_string,
-					"%02d-%02d-%02dT%02d:%02d:%02dZ %s:%d %s\nhttp://%s%s: %s\n", 
+					"%02d-%02d-%02dT%02d:%02d:%02dZ %s:%d %s \n", 
 					g_date_time_get_year(now),
 					g_date_time_get_month(now),
 					g_date_time_get_day_of_month(now),
@@ -108,16 +107,13 @@ void httpd_log_access(gchar *client_ip,
 					g_date_time_get_second(now),
 					client_ip,
 					client_port,
-					req_method,
-					host_name,
-					uri,
-					response_code);
+					message);
 	
 	// print log message out to screen
 	g_print("%s", access_string->str);
 
 	g_string_append(access_string, "\n");
-	write_to_log_file(ACCESS_LOG_FILE_LOCATION, access_string);
+	write_to_log_file(SERVER_ACCESS_LOG_FILE_LOCATION, access_string);
 
 	g_date_time_unref(now);
 	g_string_free(access_string, TRUE);

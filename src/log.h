@@ -19,12 +19,9 @@ void client_log_all_handler_cb (const gchar *log_domain,
 							   const gchar *message,
 							   gpointer user_data);
 
-void httpd_log_access(G_GNUC_UNUSED gchar *client_ip, 
+void server_log_access(G_GNUC_UNUSED gchar *client_ip, 
 					  int client_port,
-					  gchar *req_method,
-					  gchar *host_name, 
-					  gchar *uri, 
-					  G_GNUC_UNUSED gchar *response_code);
+					  gchar *message);
 
 void write_to_log_file(gchar *file_location, GString *error_string);
 
