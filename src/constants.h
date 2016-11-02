@@ -2,9 +2,9 @@
 #define CONSTANTS_H
 
 #define BLABBR_VERSION							((gchar *) "0.1")
-#define DEBUG_LOG_FILE_LOCATION					((gchar *) "./debug.log")
-#define ACCESS_LOG_FILE_LOCATION				((gchar *) "./access.log")
-#define CLIENT_DEBUG_LOG_FILE_LOCATION			((gchar *) "./debug_client.log")
+#define SERVER_DEBUG_LOG_FILE_LOCATION			((gchar *) "./server_debug.log")
+#define SERVER_ACCESS_LOG_FILE_LOCATION			((gchar *) "./server_access.log")
+#define CLIENT_DEBUG_LOG_FILE_LOCATION			((gchar *) "./client_debug.log")
 #define BLABBR_LINES_MAX						10
 #define WCHAR_STR_MAX							4000
 #define TCP_BUFFER_LENGTH						1500
