@@ -59,8 +59,8 @@ void gui_create_text_area(WINDOW *window, GSList *lines) {
 	if(lines != NULL) {
 		GSList *iterator = NULL;
 
-		for(iterator = lines; iterator; iterator = iterator->next) {
-			wprintw(window, "%ls\n", (wint_t *) iterator->data);
+		for(iterator = lines; iterator != NULL; iterator = iterator->next) {
+			wprintw(window, "%ls\n", (wchar_t *) iterator->data);	
 		}
 
 	}
