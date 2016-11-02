@@ -42,34 +42,34 @@ Additionally, for each command, the behaviour of the server is described.
 
 #### 3.1.1 Who Command
 
-    who <chat>			       - lists currents users in a chat
+    who <chatroom>		           - lists currents users in a chatroom
 
-The `<chat>` parameter indicates the chat to get a list of users from.
+The `<chatroom>` parameter indicates the chatroom to get a list of users from.
 
 List the users in the current chat. The reply MUST be a comma separated list with no trailing comma.
 
 #### 3.1.2 List Command
 
-    list                       - lists chats
+    list                           - lists chatrooms
 
-Lists all available chats. The reply MUST be a comma separated list with no trailing comma.
+Lists all available chatrooms. The reply MUST be a comma separated list with no trailing comma.
 
 #### 3.1.3 User Command
 
-    user <username> <password> - registers a user with the blabbr server
+    register <username> <password> - registers a user with the blabbr server
     
-    <username>                 = 1*20( eng_alphnum )
-    <password>                 = 6*20( text_ch )
+    <username>                     = 1*20( eng_alphnum )
+    <password>                     = 6*20( text_ch )
 
 #### 3.1.4 Join Command
 
-    join <chat>                - join into chat with target
+    join <chatroom>                - join chatroom
 
-The `<chat>` parameter indicates a chat. If the chat does not exist the server MUST create it.
+The `<chatroom>` parameter indicates a chatroom. If the chatroom does not exist the server MUST create it.
 
 #### 3.1.5 Whisper Command
 
-    whisper <user> <text>      - initiates a private chat with user
+    whisper <user> <text>          - initiates a private chatroom with user
 
 The `<user>` parameter indicates the username of the user a client wants to start a private chat with.
 
@@ -77,8 +77,8 @@ The `<text>` parameter indicates the the initial text to be sent to `<user>`. Th
 
 #### 3.1.6 Blab Command
 
-    blab <chat> <text>         - puts text into chat on behalf of client
+    blab <chatroom> <text>         - puts text into chatroom on behalf of client
 
-The `<chat>` parameter indicates the name of the chat to place text in.
+The `<chatroom>` parameter indicates the name of the chat to place text in.
 
 The `<text>` parameter indicates the text to be placed into the chat.
