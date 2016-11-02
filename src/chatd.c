@@ -240,6 +240,9 @@ int main(int argc, char **argv) {
 
                         if(clients[i]->ssl_connected) {
                             g_info("sending welcome message to %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                            server_log_access(inet_ntoa(client_addr.sin_addr),
+                                              ntohs(client_addr.sin_port),
+                                              "connected");
                             client_send_welcome(clients[i]);
                         }
 
