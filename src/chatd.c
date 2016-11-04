@@ -41,7 +41,9 @@ static int exit_fd[2];
 // FUNCTION DECLERATIONS
 int sockaddr_in_cmp(const void *addr1, const void *addr2);
 
-gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data);
+gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
+
+gboolean populate_client_fd_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data);
 
 void signal_handler(int signum);
 
@@ -51,6 +53,7 @@ int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G
 
 // MAIN
 int main(int argc, char **argv) {
+
 
     // we set a custom logging callback
     g_log_set_handler (NULL, 
@@ -94,15 +97,13 @@ int main(int argc, char **argv) {
     wchar_t data_buffer[TCP_BUFFER_LENGTH];
     struct sockaddr_in server_addr, client_addr;
     struct timeval select_timeout = {1, 0}; // 1 second
-    client_connection *clients[SERVER_MAX_CONN_BACKLOG];
+    //client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
-    //BIO *master_bio;
+    GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
+    int current_connected_count = 0;
 
-    // we initialize clients sockect fds
-    for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
-        clients[i] = malloc(sizeof(client_connection));
-        client_connection_init(clients[i]);
-    }
+    //BIO *master_bio;
+    
 
     master_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -138,9 +139,9 @@ int main(int argc, char **argv) {
     }
 
     while (TRUE) {
-
-        // zero out client address info and data buffer
-        memset(data_buffer, 0, TCP_BUFFER_LENGTH);
+        GArray *client_fds = g_array_new(TRUE, TRUE, sizeof(int));
+        g_tree_foreach(clients, populate_client_fd_array, &client_fds);
+        // zero out client address info
         memset(&client_addr, 0, sizeof(client_addr));
 
         // set appropriate client address length (otherwise client_addr isn't populated correctly by accept())
@@ -156,22 +157,29 @@ int main(int argc, char **argv) {
             incoming_sd_max = master_socket + 1;
         }
 
-        for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
+        for(unsigned int i = 0; i < client_fds->len; i++) {
 
-            working_client_connection = clients[i];
+            int client_fd = g_array_index (client_fds, int, i);
+            g_info("CLIENT_FD_ARRAY %d", client_fd);
 
-            if(working_client_connection->fd > CONN_FREE) {
-                FD_SET(working_client_connection->fd, &incoming_fds);
+        }
+
+        for(unsigned int i = 0; i < client_fds->len; i++) {
+
+            int client_fd = g_array_index (client_fds, int, i);
+
+            if(client_fd > incoming_sd_max) {
+                incoming_sd_max = client_fd;
             }
 
-            if(working_client_connection->fd > incoming_sd_max) {
-                incoming_sd_max = working_client_connection->fd;
-            }
+            g_info("FD_SET %d", client_fd);
+            FD_SET(client_fd, &incoming_fds);
 
         }
 
         select_timeout.tv_sec = 1;
         select_activity = select(incoming_sd_max + 1, &incoming_fds, NULL, NULL, &select_timeout);
+        g_info("tick!");
 
         // do we catch a signal?
         if (FD_ISSET(exit_fd[0], &incoming_fds)) {
@@ -214,42 +222,41 @@ int main(int argc, char **argv) {
                 g_info("new connection on socket fd %d, ip %s:%d", new_socket, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
                 bool found_socket = FALSE;
-                for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
+                if(current_connected_count < SERVER_MAX_CONN_BACKLOG) {
 
-                    if(clients[i]->fd == CONN_FREE) {
+                    //client_connection_reset(clients[i]);
+                    working_client_connection = malloc(sizeof(client_connection));
+                    client_connection_init(working_client_connection);
 
-                        //client_connection_reset(clients[i]);
+                    SSL *new_ssl = SSL_new(ssl_ctx);
 
-                        SSL *new_ssl = SSL_new(ssl_ctx);
+                    working_client_connection->ssl = new_ssl;
+                    working_client_connection->bio_ssl = BIO_new(BIO_s_socket());
+                    BIO_set_fd(working_client_connection->bio_ssl, new_socket, BIO_NOCLOSE);
+                    SSL_set_bio(new_ssl, working_client_connection->bio_ssl, working_client_connection->bio_ssl);
 
-                        clients[i]->ssl = new_ssl;
-                        clients[i]->bio_ssl = BIO_new(BIO_s_socket());
-                        BIO_set_fd(clients[i]->bio_ssl, new_socket, BIO_NOCLOSE);
-                        SSL_set_bio(new_ssl, clients[i]->bio_ssl, clients[i]->bio_ssl);
+                    int ssl_status = SSL_accept(new_ssl);
 
-                        int ssl_status = SSL_accept(new_ssl);
-
-                        if(ssl_status <= 0) {
-                            ssl_print_error(ssl_status);
-                        }
-
-                        clients[i]->ssl_connected = (ssl_status == 1 ? TRUE : FALSE);
-                        clients[i]->fd = new_socket;
-                        found_socket = TRUE;
-
-
-                        if(clients[i]->ssl_connected) {
-                            g_info("sending welcome message to %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-                            server_log_access(inet_ntoa(client_addr.sin_addr),
-                                              ntohs(client_addr.sin_port),
-                                              "connected");
-                            client_send_welcome(clients[i]);
-                        }
-
-                        break;
+                    if(ssl_status <= 0) {
+                        ssl_print_error(ssl_status);
                     }
 
-                }
+                    working_client_connection->ssl_connected = (ssl_status == 1 ? TRUE : FALSE);
+                    working_client_connection->fd = new_socket;
+                    found_socket = TRUE;
+
+
+                    if(working_client_connection->ssl_connected) {
+                        g_info("sending welcome message to %s:%d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                        server_log_access(inet_ntoa(client_addr.sin_addr),
+                                          ntohs(client_addr.sin_port),
+                                          "connected");
+                        client_send_welcome(working_client_connection);
+                    }
+
+                    g_tree_insert(clients, &working_client_connection->fd, working_client_connection);
+                    current_connected_count++;
+            }
 
                 if(found_socket == FALSE) {
                     g_critical("no free client connection slots available, unable to track this connection");
@@ -263,13 +270,62 @@ int main(int argc, char **argv) {
             }
         }
 
+        for(unsigned int i = 0; i < client_fds->len; i++) {
+            int client_fd = g_array_index (client_fds, int, i);
+
+            g_info("client fd is %d", client_fd);
+
+            if(FD_ISSET(client_fd, &incoming_fds)) {
+                
+                working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
+                gboolean shutdown_ssl = FALSE;
+                gboolean connection_closed = FALSE;
+
+                // zero out data_buffer for "safe" reading
+                memset(data_buffer, 0, TCP_BUFFER_LENGTH * sizeof(wchar_t));
+
+                int ret = SSL_read(working_client_connection->ssl, data_buffer, TCP_BUFFER_LENGTH * sizeof(wchar_t));
+                getpeername(working_client_connection->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
+                // we do ret <= 0 because this indicates error / shutdown (hopefully a clean one)
+                // ideally we will detect the error and deal with it but you know
+                if(ret <= 0) {
+                    connection_closed = TRUE;
+                }
+
+                if(SSL_RECEIVED_SHUTDOWN == SSL_get_shutdown(working_client_connection->ssl) || connection_closed) {
+                    SSL_shutdown(working_client_connection->ssl);
+                    shutdown_ssl = TRUE;
+                }
+
+                if(shutdown_ssl || connection_closed) {
+                    g_info("closing connection on socket fd %d, ip %s, port %d", 
+                            working_client_connection->fd, 
+                            inet_ntoa(client_addr.sin_addr), 
+                            ntohs(client_addr.sin_port));
+
+                    shutdown(working_client_connection->fd, SHUT_RDWR);
+                    close(working_client_connection->fd);
+
+                    g_tree_remove(clients, &working_client_connection->fd);
+                    current_connected_count--;
+
+                    // we continue because nothing else to be done with this client connection now
+                    continue;
+                }
+            } 
+        }
+
+        // we free up the client fds GArray
+        g_array_free(client_fds, TRUE);
     }
 
+    // We free up the client connections GTree
+    g_tree_destroy(clients);
     //BIO_vfree(master_bio);
     SSL_CTX_free(ssl_ctx);
-    for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
-        client_connection_reset(clients[i]);
-    }
+    // for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
+    //     client_connection_reset(clients[i]);
+    // }
 
     exit(EXIT_SUCCESS);
 }
@@ -304,8 +360,18 @@ int sockaddr_in_cmp(const void *addr1, const void *addr2) {
 
 /* This can be used to build instances of GTree that index on
    the file descriptor of a connection. */
-gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data) {
-    return GPOINTER_TO_INT(fd1) - GPOINTER_TO_INT(fd2);
+// gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data) {
+//     return GPOINTER_TO_INT(fd1) - GPOINTER_TO_INT(fd2);
+// }
+
+gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
+    return *((int*) a) - *((int*) b);
+}
+
+gboolean populate_client_fd_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data) {
+    GArray **fd_array = (GArray **) data;
+    *fd_array = g_array_append_val(*fd_array, *((int *)key));
+    return FALSE;
 }
 
 void signal_handler(int signum) {

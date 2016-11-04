@@ -28,4 +28,10 @@ void client_connection_init(client_connection *client);
 
 void client_connection_reset(client_connection *client);
 
+// this is the GDestroyFunc for the keys of the GTree of client connections
+void client_connection_gtree_key_destroy(gpointer data);
+
+// this is the GDestroyFunc for the values of the GTree of client connections
+void client_connection_gtree_value_destroy(gpointer data);
+
 #endif

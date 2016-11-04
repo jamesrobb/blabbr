@@ -61,3 +61,12 @@ void client_connection_reset(client_connection *client) {
     	g_free(client->username);
     }
 }
+
+void client_connection_gtree_key_destroy(gpointer data) {
+    g_free((int *) data);
+}
+
+void client_connection_gtree_value_destroy(gpointer data) {
+    client_connection_reset((client_connection*) data);
+    g_free((client_connection*) data);
+}
