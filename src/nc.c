@@ -87,8 +87,10 @@ int main(int argc, char **argv) {
 	int text_area_lines_count = 0;
 	
 	wchar_t quit_command[] = L"/quit";
+	wchar_t bye_command[] = L"/bye";
 	wchar_t register_command[] = L"/register";
 	size_t quit_command_len = wcslen(quit_command);
+	size_t bye_command_len = wcslen(bye_command);
 	size_t register_command_len = wcslen(register_command);
 	struct input_buffer user_input_buffer;
 	line_buffer_make(&user_input_buffer);
@@ -251,8 +253,12 @@ int main(int argc, char **argv) {
 			if(wcsncmp(quit_command, user_line, quit_command_len) == 0) {
 				exit_main_loop = 1;
 				break;
-
-			} else if (wcsncmp(register_command, user_line, register_command_len) == 0) {
+			} 
+			else if(wcsncmp(bye_command, user_line, bye_command_len) == 0) {
+				exit_main_loop = 1;
+				break;
+			}
+			else if (wcsncmp(register_command, user_line, register_command_len) == 0) {
 
 				gui_create_input_area(input_area_win, NULL);
 				wrefresh(input_area_win);
@@ -294,7 +300,7 @@ int main(int argc, char **argv) {
 
 				wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
 				memcpy(str, user_line, user_line_len * sizeof(wchar_t));
-
+				SSL_write(ssl, str, user_line_len * sizeof(wchar_t));
 				text_area_lines = g_slist_append(text_area_lines, str);
 				text_area_lines_count++;
 				draw_text_area = 1;
