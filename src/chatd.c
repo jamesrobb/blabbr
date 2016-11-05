@@ -28,6 +28,7 @@
 #include <openssl/bio.h>
 
 #include "client_connection.h"
+#include "chatroom.h"
 #include "constants.h"
 #include "log.h"
 #include "util.h"
@@ -100,7 +101,15 @@ int main(int argc, char **argv) {
     //client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
     GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
+    GTree *chatrooms = g_tree_new_full(wcsncmp, NULL, NULL, chatroom_gtree_value_destroy);
     int current_connected_count = 0;
+
+    //gkeyfile ----------------- username - password store
+    GKeyFile *user_database = g_key_file_new();
+    gchar *user_database_path = "./user_database.conf";
+    gchar *user_database_group = "users";
+    //gkeyfile end -- this is just a test for now
+
 
     //BIO *master_bio;
     
@@ -272,12 +281,14 @@ int main(int argc, char **argv) {
 
         for(unsigned int i = 0; i < client_fds->len; i++) {
             int client_fd = g_array_index (client_fds, int, i);
-
+            working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
+            getpeername(working_client_connection->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
             g_info("client fd is %d", client_fd);
 
             if(FD_ISSET(client_fd, &incoming_fds)) {
-                
-                working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
+                working_client_connection->last_activity = time(NULL);
+                working_client_connection->timeout_notification = FALSE;
+                //working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
                 gboolean shutdown_ssl = FALSE;
                 gboolean connection_closed = FALSE;
 
@@ -285,7 +296,9 @@ int main(int argc, char **argv) {
                 memset(data_buffer, 0, TCP_BUFFER_LENGTH * sizeof(wchar_t));
 
                 int ret = SSL_read(working_client_connection->ssl, data_buffer, TCP_BUFFER_LENGTH * sizeof(wchar_t));
-                getpeername(working_client_connection->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
+
+                //g_info("ret value %d", ret);
+
                 // we do ret <= 0 because this indicates error / shutdown (hopefully a clean one)
                 // ideally we will detect the error and deal with it but you know
                 if(ret <= 0) {
@@ -303,22 +316,109 @@ int main(int argc, char **argv) {
                             inet_ntoa(client_addr.sin_addr), 
                             ntohs(client_addr.sin_port));
 
+                    // log that user disconnected
+                    server_log_access(inet_ntoa(client_addr.sin_addr),
+                                          ntohs(client_addr.sin_port),
+                                          "disconnected");
+
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
                     g_tree_remove(clients, &working_client_connection->fd);
                     current_connected_count--;
-
+                    
                     // we continue because nothing else to be done with this client connection now
                     continue;
                 }
+
+                if(ret > 0) {
+                    // checking wether input was command
+                    if(wcsncmp(L"/", data_buffer, 1) == 0) {
+                        
+                        wchar_t* buffer;
+                        wchar_t* token;
+
+                        wchar_t register_command[] = L"/regi ";
+
+                        if(wcsncmp(L"/regi ", data_buffer, wcslen(register_command)) == 0) {
+
+                            // setup GkeyFile
+                            //GError *file_errors;
+                            // g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, &file_errors);
+                            g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, NULL);
+                            token = wcstok(data_buffer, L" ", &buffer);
+                            // do it one more time to skip the '/regi ' part because we already know it's there
+                            token = wcstok(NULL, L" ", &buffer); // this should then be the username part of the command
+                            wchar_t *username = token;
+
+                            // check wether username is already in user_database
+                            gchar *username_uni_check = g_utf16_to_utf8((gunichar2 *) token, -1, NULL, NULL, NULL);
+                            wchar_t *username_check = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_uni_check, NULL);
+                            
+                            if( username_check == NULL ){
+                                working_client_connection->username = username;
+                                token = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
+                                gchar *password_uni_check = g_utf16_to_utf8((gunichar2 *) token, -1, NULL, NULL, NULL);
+                                g_info("username %s - password %s", username_uni_check, password_uni_check);
+                                g_key_file_set_value(user_database, user_database_group, username_uni_check, password_uni_check);
+                                g_key_file_save_to_file(user_database, user_database_path, NULL);
+                                g_free(password_uni_check);
+                            }
+                            else {
+                                wchar_t user_taken[] = L"username taken";
+                                SSL_write(working_client_connection->ssl, user_taken, wcslen(user_taken) * sizeof(wchar_t));  
+                            }
+                            g_free(username_uni_check);
+                        }
+
+                        if(wcsncmp(L"/join ", data_buffer, wcslen(register_command)) == 0) {
+                            token = wcstok(data_buffer, L" ", &buffer); // now it's just the /join part
+                            token = wcstok(data_buffer, L" ", &buffer); // now it should be the chatroom name part
+                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, &token);
+                            if(working_chatroom != NULL) {
+                                g_info("chatroom exists!");
+                            }
+                            else {
+                                GList *new_chatroom;
+                                g_tree_insert(chatrooms, &token, new_chatroom);
+                            }
+                        }
+                    }
+
+                    
+                }
             } 
+            else {
+                if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT - 5 && working_client_connection->timeout_notification != TRUE) {
+                    wchar_t connection_time_out[] = L"your connection is about to be timed out";
+                    SSL_write(working_client_connection->ssl, connection_time_out, wcslen(connection_time_out) * sizeof(wchar_t));
+                    working_client_connection->timeout_notification = TRUE;
+                }
+                // handling timeouts
+                if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
+                    // wchar_t connection_timed_out[] = L"your connection timed out";
+                    // SSL_write(working_client_connection->ssl, connection_timed_out, wcslen(connection_timed_out) * sizeof(wchar_t));
+
+
+                    // log that user timed out
+                    server_log_access(inet_ntoa(client_addr.sin_addr),
+                                          ntohs(client_addr.sin_port),
+                                          "timed out");
+
+                    shutdown(working_client_connection->fd, SHUT_RDWR);
+                    close(working_client_connection->fd);
+
+                    g_tree_remove(clients, &working_client_connection->fd);
+                    current_connected_count--;
+                }
+            }
         }
 
         // we free up the client fds GArray
         g_array_free(client_fds, TRUE);
     }
-
+    // we free up the gkeyfile database
+    g_key_file_free(user_database);
     // We free up the client connections GTree
     g_tree_destroy(clients);
     //BIO_vfree(master_bio);

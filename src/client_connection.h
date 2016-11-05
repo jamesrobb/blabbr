@@ -13,6 +13,7 @@
 
 typedef struct _client_connection {
     time_t last_activity;
+    gboolean timeout_notification;
     int fd;
     gboolean close; // if this flag is set, we know we can issue close() on the connection
     gboolean authenticated;
