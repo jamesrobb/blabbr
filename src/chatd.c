@@ -46,6 +46,10 @@ gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer 
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
+gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpointer data);
+
+gboolean print_chatroom_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data);
+
 gboolean populate_client_fd_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data);
 
 void signal_handler(int signum);
@@ -336,13 +340,15 @@ int main(int argc, char **argv) {
                 if(ret > 0) {
                     // checking wether input was command
                     if(wcsncmp(L"/", data_buffer, 1) == 0) {
-                        
                         wchar_t* buffer;
                         wchar_t* token;
 
                         wchar_t register_command[] = L"/regi ";
+                        wchar_t join_command[] = L"/join ";
+                        wchar_t list_command[] = L"/list";
+                        wchar_t who_command[] = L"/who";
 
-                        if(wcsncmp(L"/regi ", data_buffer, wcslen(register_command)) == 0) {
+                        if(wcsncmp(register_command, data_buffer, wcslen(register_command)) == 0) {
 
                             // setup GkeyFile
                             //GError *file_errors;
@@ -373,19 +379,47 @@ int main(int argc, char **argv) {
                             g_free(username_uni_check);
                         }
 
-                        if(wcsncmp(L"/join ", data_buffer, wcslen(register_command)) == 0) {
+                        if(wcsncmp(join_command, data_buffer, wcslen(join_command)) == 0) {
                             token = wcstok(data_buffer, L" ", &buffer); // now it's just the /join part
-                            token = wcstok(data_buffer, L" ", &buffer); // now it should be the chatroom name part
-                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, &token);
+                            token = wcstok(NULL, L" ", &buffer); // now it should be the chatroom name part
+
+                            wchar_t *chatroom_name = g_malloc((wcslen(token)+1) * sizeof(wchar_t));
+                            chatroom_name = wcscpy(chatroom_name, token);
+
+                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, chatroom_name);
                             if(working_chatroom != NULL) {
-                                g_info("chatroom exists!");
+                                g_info("existing chatroom entered");
+                                working_chatroom = g_list_append(working_chatroom, &working_client_connection);
+                                g_free(chatroom_name);
                             }
                             else {
+                                g_info("new chatroom made");
                                 GList *new_chatroom = NULL;
                                 new_chatroom = g_list_append(new_chatroom, working_client_connection);
-                                g_tree_insert(chatrooms, &token, new_chatroom);
+                                g_tree_insert(chatrooms, chatroom_name, new_chatroom);
+                                g_info("count of chatrooms %d", g_tree_nnodes(chatrooms));
                             }
+
                         }
+
+                        if(wcsncmp(list_command, data_buffer, wcslen(list_command)) == 0) {
+                            wchar_t *chatroom_list;
+                            chatroom_list = g_malloc(sizeof(wchar_t) * 10000); 
+                            memset(chatroom_list, 0, sizeof(wchar_t) * 10000);
+                            g_tree_foreach(chatrooms, print_chatroom_array, chatroom_list);
+                            SSL_write(working_client_connection->ssl, chatroom_list, wcslen(chatroom_list) * sizeof(wchar_t));
+                            g_free(chatroom_list);
+                        }
+
+                        if(wcsncmp(who_command, data_buffer, wcslen(who_command)) == 0) {
+                            wchar_t *available_user_list;
+                            available_user_list = g_malloc(sizeof(wchar_t) * 10000); 
+                            memset(available_user_list, 0, sizeof(wchar_t) * 10000);
+                            g_tree_foreach(clients, print_available_users, available_user_list);
+                            SSL_write(working_client_connection->ssl, available_user_list, wcslen(available_user_list) * sizeof(wchar_t));
+                            g_free(available_user_list);
+                        }
+
                     }
 
                     
@@ -401,8 +435,6 @@ int main(int argc, char **argv) {
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
                     // wchar_t connection_timed_out[] = L"your connection timed out";
                     // SSL_write(working_client_connection->ssl, connection_timed_out, wcslen(connection_timed_out) * sizeof(wchar_t));
-
-
                     // log that user timed out
                     server_log_access(inet_ntoa(client_addr.sin_addr),
                                           ntohs(client_addr.sin_port),
@@ -416,12 +448,14 @@ int main(int argc, char **argv) {
                 }
             }
         }
-
         // we free up the client fds GArray
         g_array_free(client_fds, TRUE);
     }
     // we free up the gkeyfile database
     g_key_file_free(user_database);
+
+    // we free up the chatroom gtree
+    g_tree_destroy(chatrooms);
     // We free up the client connections GTree
     g_tree_destroy(clients);
     //BIO_vfree(master_bio);
@@ -468,15 +502,29 @@ int sockaddr_in_cmp(const void *addr1, const void *addr2) {
 // }
 
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
-    unsigned int minLenght = wcslen(b);
-    if(wcslen(a) < minLenght) {
-        minLenght = wcslen(a);
+    unsigned int minLenght = wcslen((wchar_t *) b);
+    g_info("entered comparator");
+    g_info("comparing a = %ls to b = %ls", (wchar_t *) a, (wchar_t *) b);
+    if(wcslen((wchar_t *) a) < minLenght) {
+        minLenght = wcslen((wchar_t *) a);
     }
-    return wcsncmp(a,b,minLenght);
+    return wcsncmp((wchar_t *) a,(wchar_t *) b,minLenght);
 }
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
     return *((int*) a) - *((int*) b);
+}
+
+gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpointer data) {
+    wcscat(data, (wchar_t *) ((client_connection *) value)->username);
+    wcscat(data, L"\n");
+    return FALSE;
+}
+
+gboolean print_chatroom_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data) {
+    wcscat(data, (wchar_t *) key);
+    wcscat(data, L"\n");
+    return FALSE;
 }
 
 gboolean populate_client_fd_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data) {
