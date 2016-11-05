@@ -23,7 +23,7 @@ client_connection.o: client_connection.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
 chatroom.o: chatroom.c
-	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.o openssl --libs) -lm
+	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
 util.o: util.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
