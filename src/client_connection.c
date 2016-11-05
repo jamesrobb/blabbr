@@ -59,6 +59,7 @@ void client_connection_reset(client_connection *client) {
     	SSL_free(client->ssl);
     }
 
+    g_free(client->username);
     client->username = NULL;
 
     // this produced free/delete errors

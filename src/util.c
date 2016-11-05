@@ -2,6 +2,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/bio.h>
+#include <locale.h>
 
 #include "util.h"
 
@@ -164,4 +165,16 @@ void ssl_print_error(int ssl_error) {
             break;
     }
 
+}
+
+gchar* wchars_to_gchars(wchar_t *source) {
+
+	// for unicode purposes
+    setlocale(LC_ALL, "en_US.utf8");
+
+	int dest_len = (wcslen(source) * sizeof(wchar_t)) + 1;
+    gchar *dest_pointer = g_malloc(dest_len);
+    wcstombs(dest_pointer, source, dest_len);
+
+    return dest_pointer;
 }

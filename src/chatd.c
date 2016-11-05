@@ -8,7 +8,9 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <math.h>
 #include <glib.h>
+#include <locale.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -21,6 +23,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <wchar.h>
+#include <linux/random.h>
 
 // open ssl headers
 #include <openssl/ssl.h>
@@ -56,6 +59,9 @@ int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G
 
 // MAIN
 int main(int argc, char **argv) {
+
+    // for unicode purposes
+    setlocale(LC_ALL, "en_US.utf8");
 
 
     // we set a custom logging callback
@@ -110,6 +116,7 @@ int main(int argc, char **argv) {
     GKeyFile *user_database = g_key_file_new();
     gchar *user_database_path = "./user_database.conf";
     gchar *user_database_group = "users";
+    gchar *user_salt_database_group = "user_salt";
     //gkeyfile end -- this is just a test for now
 
 
@@ -209,6 +216,7 @@ int main(int argc, char **argv) {
 
             if (signum == SIGINT) {
                 g_warning("we are exiting");
+                break;
                 exit(EXIT_SUCCESS);
             } else if (signum == SIGTERM) {
                 /* Clean-up and exit. */
@@ -354,23 +362,56 @@ int main(int argc, char **argv) {
                             wchar_t *username = token;
 
                             // check wether username is already in user_database
-                            gchar *username_uni_check = g_utf16_to_utf8((gunichar2 *) token, -1, NULL, NULL, NULL);
-                            wchar_t *username_check = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_uni_check, NULL);
+                            gchar *username_mbs = wchars_to_gchars(username);
+                            //g_info("gchar username is %s", username_mbs);
+
+                            wchar_t *username_check = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_mbs, NULL);
                             
-                            if( username_check == NULL ){
-                                working_client_connection->username = username;
-                                token = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
-                                gchar *password_uni_check = g_utf16_to_utf8((gunichar2 *) token, -1, NULL, NULL, NULL);
-                                g_info("username %s - password %s", username_uni_check, password_uni_check);
-                                g_key_file_set_value(user_database, user_database_group, username_uni_check, password_uni_check);
+                            if(username_check == NULL) {
+
+                                wchar_t *password = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
+                                gchar *password_mbs = wchars_to_gchars(password);
+                                unsigned char hash[SHA256_DIGEST_LENGTH];
+                                gchar hash_string[65];
+                                gchar salt_string[31];
+
+                                for(int i = 0; i < 30; i++) {
+                                    sprintf(salt_string + (i * 2), "%02x", (int) floor(drand48() * 255.0));
+                                }
+                                salt_string[30] = '\0';
+
+                                SHA256_CTX sha256;
+                                SHA256_Init(&sha256);
+                                for(int i = 0; i < 10000; i++) {
+                                    SHA256_Update(&sha256, password_mbs, gchar_array_len(password_mbs)-1);
+                                    SHA256_Update(&sha256, salt_string, 30);
+                                }
+                                SHA256_Final(hash, &sha256);
+                                
+                                for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+                                    sprintf(hash_string + (i * 2), "%02x", hash[i]);
+                                }
+                                hash_string[64] = 0;
+
+                                g_info("username %s - hash_password %s - salt %s", username_mbs, hash_string, salt_string);
+                                g_key_file_set_value(user_database, user_database_group, username_mbs, hash_string);
+                                g_key_file_set_value(user_database, user_salt_database_group, username_mbs, salt_string);
                                 g_key_file_save_to_file(user_database, user_database_path, NULL);
-                                g_free(password_uni_check);
+
+                                wchar_t *client_username = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
+                                wcscpy(client_username, username);
+                                working_client_connection->username = client_username;
+
+                                g_free(password_mbs);
                             }
+
                             else {
                                 wchar_t user_taken[] = L"username taken";
                                 SSL_write(working_client_connection->ssl, user_taken, wcslen(user_taken) * sizeof(wchar_t));  
                             }
-                            g_free(username_uni_check);
+
+                            g_free(username_mbs);
+                            g_free(username_check);
                         }
 
                         if(wcsncmp(L"/join ", data_buffer, wcslen(register_command)) == 0) {
@@ -392,6 +433,7 @@ int main(int argc, char **argv) {
                 }
             } 
             else {
+
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT - 5 && working_client_connection->timeout_notification != TRUE) {
                     wchar_t connection_time_out[] = L"your connection is about to be timed out";
                     SSL_write(working_client_connection->ssl, connection_time_out, wcslen(connection_time_out) * sizeof(wchar_t));
@@ -422,8 +464,9 @@ int main(int argc, char **argv) {
     }
     // we free up the gkeyfile database
     g_key_file_free(user_database);
-    // We free up the client connections GTree
+    // We free up the client connections and chatroom GTree
     g_tree_destroy(clients);
+    g_tree_destroy(chatrooms);
     //BIO_vfree(master_bio);
     SSL_CTX_free(ssl_ctx);
     // for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
