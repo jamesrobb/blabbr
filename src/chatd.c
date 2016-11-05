@@ -42,6 +42,8 @@ static int exit_fd[2];
 // FUNCTION DECLERATIONS
 int sockaddr_in_cmp(const void *addr1, const void *addr2);
 
+gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
+
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
 gboolean populate_client_fd_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data);
@@ -101,7 +103,7 @@ int main(int argc, char **argv) {
     //client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
     GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
-    GTree *chatrooms = g_tree_new_full(wcsncmp, NULL, NULL, chatroom_gtree_value_destroy);
+    GTree *chatrooms = g_tree_new_full(g_tree_wchar_cmp, NULL, NULL, chatroom_gtree_value_destroy);
     int current_connected_count = 0;
 
     //gkeyfile ----------------- username - password store
@@ -379,7 +381,8 @@ int main(int argc, char **argv) {
                                 g_info("chatroom exists!");
                             }
                             else {
-                                GList *new_chatroom;
+                                GList *new_chatroom = NULL;
+                                new_chatroom = g_list_append(new_chatroom, working_client_connection);
                                 g_tree_insert(chatrooms, &token, new_chatroom);
                             }
                         }
@@ -463,6 +466,14 @@ int sockaddr_in_cmp(const void *addr1, const void *addr2) {
 // gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data) {
 //     return GPOINTER_TO_INT(fd1) - GPOINTER_TO_INT(fd2);
 // }
+
+gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
+    unsigned int minLenght = wcslen(b);
+    if(wcslen(a) < minLenght) {
+        minLenght = wcslen(a);
+    }
+    return wcsncmp(a,b,minLenght);
+}
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
     return *((int*) a) - *((int*) b);

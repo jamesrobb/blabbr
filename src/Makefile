@@ -7,7 +7,7 @@ all: chatd nc
 chat: chat.o getpasswd.o
 	$(CC) $(CFLAGS) -o $@ $^ -lreadline $(shell pkg-config glib-2.0 openssl --libs)
 
-chatd: chatd.o log.o client_connection.o util.o
+chatd: chatd.o log.o client_connection.o util.o chatroom.o
 	$(CC) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
 
 getpassword.o: getpassword.c
@@ -21,6 +21,9 @@ log.o: log.c
 
 client_connection.o: client_connection.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
+
+chatroom.o: chatroom.c
+	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.o openssl --libs) -lm
 
 util.o: util.c
 	$(CC) $(OBJFLAGS) $(CFLAGS) -o $@ $^ $(shell pkg-config glib-2.0 openssl --libs) -lm
