@@ -252,6 +252,7 @@ int main(int argc, char **argv) {
 			// we finally got some input
 			if(wcsncmp(quit_command, user_line, quit_command_len) == 0) {
 				exit_main_loop = 1;
+				SSL_shutdown(ssl);
 				break;
 			} 
 			else if(wcsncmp(bye_command, user_line, bye_command_len) == 0) {

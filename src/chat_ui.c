@@ -39,20 +39,8 @@ void gui_create_siderbar(WINDOW *window) {
 }
 
 void gui_create_text_area(WINDOW *window, GSList *lines) {
-	// int rows, cols;
-	// getmaxyx(window, rows, cols);
-
 	scrollok(window, TRUE);
 	wclear(window);
-
-	// wattron(window, A_BOLD);
-	// wattron(window, COLOR_PAIR(WARNING_PAIR));
-
-	// mvwprintw(window, 0, 0, "Press F1 to exit");
-	// mvwprintw(window, 1, 0, "þÞ ðÐ öÖ áÁ éÉ αΑ βΒ γΓ ωΩ - Er unicode að virka?");
-
-	// wattroff(window, A_BOLD);
-	// wattroff(window, COLOR_PAIR(WARNING_PAIR));
 
 	wmove(window, 0, 0);
 
