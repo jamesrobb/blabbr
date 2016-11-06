@@ -68,8 +68,6 @@ int main(int argc, char **argv) {
     	strncpy(server_ip, "127.0.0.1", 9);
     }
 
-    initialize_exit_fd();
-
 	// we define this variable earlier than others for logging purposes
 	GSList *text_area_lines = NULL;
 	GSList **text_area_lines_ref = &text_area_lines;
@@ -121,7 +119,7 @@ int main(int argc, char **argv) {
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+    inet_pton(AF_INET, server_ip, &server.sin_addr);
     server.sin_port = htons(server_port);
 
     int connect_res = connect(server_fd, (struct sockaddr *) &server, sizeof(server));
@@ -195,6 +193,8 @@ int main(int argc, char **argv) {
 	wrefresh(input_area_win);
 
 	BIO_set_nbio(server_bio, 1);
+
+	initialize_exit_fd();
 
 	while(1 && !exit_main_loop) {
 
