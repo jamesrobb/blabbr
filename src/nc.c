@@ -54,9 +54,18 @@ int main(int argc, char **argv) {
 	// for unicode purposes
 	setlocale(LC_ALL, "");
 
-	if (argc != 2) {
+	if (argc > 3 || argc < 2) {
         g_critical("Usage: %s <port>\n", argv[0]);
         exit(EXIT_FAILURE);
+    }
+
+    char server_ip[16] = {0};
+    int server_port = strtol(argv[1], NULL, 10);
+
+    if(argc == 3) {
+    	strncpy(server_ip, argv[2], 15);
+    } else {
+    	strncpy(server_ip, "127.0.0.1", 9);
     }
 
     initialize_exit_fd();
@@ -100,7 +109,6 @@ int main(int argc, char **argv) {
 	int server_fd;
 	int select_activity;
 	int select_timeout_usec = 20000; // 20th of a second
-	const int server_port = strtol(argv[1], NULL, 10);
 	int ssl_error;
 	fd_set read_fds;
 	struct timeval select_timeout;
@@ -360,6 +368,7 @@ int main(int argc, char **argv) {
 
 	                        g_free(ui_username);
 	                        wchar_t *username = g_malloc((wcslen(token) + 1) * sizeof(wchar_t));
+	                        memset(username, 0, (wcslen(token) + 1) * sizeof(wchar_t));
 	                        wcscat(username, token);
 	                        ui_username = username;
                     	}
