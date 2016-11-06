@@ -301,12 +301,9 @@ int main(int argc, char **argv) {
             getpeername(working_client_connection->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
             g_info("client fd is %d", client_fd);
 
-            
-
             if(FD_ISSET(client_fd, &incoming_fds)) {
                 working_client_connection->last_activity = time(NULL);
                 working_client_connection->timeout_notification = FALSE;
-
                 
                 //working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
                 gboolean shutdown_ssl = FALSE;
@@ -346,6 +343,7 @@ int main(int argc, char **argv) {
                     server_log_access(inet_ntoa(client_addr.sin_addr),
                                           ntohs(client_addr.sin_port),
                                           "disconnected");
+
                     // remove the user from his chatroom if he was in one.
                     if(working_client_connection->current_chatroom != NULL) {
                         GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
@@ -368,14 +366,50 @@ int main(int argc, char **argv) {
                         wchar_t* token;
 
                         wchar_t register_command[] = L"/regi ";
+                        wchar_t user_command[] = L"/user ";
                         wchar_t join_command[] = L"/join ";
                         wchar_t list_command[] = L"/list";
                         wchar_t who_command[] = L"/who";
                         wchar_t say_command[] = L"/say ";
                         wchar_t help_command[] = L"/help";
+                        wchar_t nick_command[] = L"/nick ";
+
+                        gboolean command_entered = FALSE;
+
+                        if(wcsncmp(user_command, data_buffer, wcslen(user_command)) == 0) {
+                            command_entered = TRUE;
+
+                            g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, NULL);
+                            token = wcstok(data_buffer, L" ", &buffer); // /user part
+                            token = wcstok(NULL, L" ", &buffer); // this should then be the username part of the command
+                            wchar_t *username = token;
+                            // convert wchar_t to gchars
+                            gchar *username_mbs = wchars_to_gchars(username);
+                            // checking wether username is in database
+                            wchar_t *password_hashed = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_mbs, NULL);
+                            if(password_hashed != NULL) {
+                                wchar_t *salt = (wchar_t *) g_key_file_get_value(user_database, user_salt_database_group, username_mbs, NULL);
+                                wchar_t *password = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
+                                gchar *password_mbs = wchars_to_gchars(password);
+
+                                // TODO HASH THE VALUE IN PASSWORD AND COMPARE TO USERNAME_CHECK.
+
+                                // -------------------------------------------------------------- 
+                                g_free(salt);
+                                g_free(password_mbs);
+                            }
+                            else {
+                                wchar_t *user_error_text = L"Username not found. Use '/regi <username> <password>' to create an account";
+                                int bytes_needed = wcslen(user_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                SSL_write(working_client_connection->ssl, user_error_text, bytes_needed);
+                            }
+                            g_free(password_hashed);
+                            g_free(username_mbs);
+
+                        }
 
                         if(wcsncmp(register_command, data_buffer, wcslen(register_command)) == 0) {
-
+                            command_entered = TRUE;
                             // setup GkeyFile
                             //GError *file_errors;
                             // g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, &file_errors);
@@ -422,9 +456,26 @@ int main(int argc, char **argv) {
                                 g_key_file_set_value(user_database, user_salt_database_group, username_mbs, salt_string);
                                 g_key_file_save_to_file(user_database, user_database_path, NULL);
 
+                                int ip_bytes_needed = 16 * sizeof(wchar_t);
+                                wchar_t client_ip_char_wchar[ip_bytes_needed];
+                                swprintf(client_ip_char_wchar, ip_bytes_needed, L"%hs", inet_ntoa(client_addr.sin_addr));
+                                wchar_t *client_ip_address = g_malloc(ip_bytes_needed); // ipaddr max is 4 * 3 char blocks and 3 dots in between + null term
+                                memset(client_ip_address, 0, (ip_bytes_needed));
+                                wcscpy(client_ip_address, client_ip_char_wchar);
+                                
+                                
+                                int client_port_number = ntohs(client_addr.sin_port);
+
+                                working_client_connection->ip_address = client_ip_address;
+                                working_client_connection->port_number = client_port_number;
+
                                 wchar_t *client_username = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
                                 wcscpy(client_username, username);
+                                wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
+                                wcscpy(client_nickname, username);
+
                                 working_client_connection->username = client_username;
+                                working_client_connection->nickname = client_nickname;
                                 working_client_connection->authenticated = TRUE;
                                 g_free(password_mbs);
                             }
@@ -439,6 +490,8 @@ int main(int argc, char **argv) {
                         }
 
                         if(wcsncmp(join_command, data_buffer, wcslen(join_command)) == 0) {
+                            command_entered = TRUE;
+
                             token = wcstok(data_buffer, L" ", &buffer); // now it's just the /join part
                             token = wcstok(NULL, L" ", &buffer); // now it should be the chatroom name part
 
@@ -446,13 +499,15 @@ int main(int argc, char **argv) {
                             memset(chatroom_name, 0, (wcslen(token)+1) * sizeof(wchar_t));
                             chatroom_name = wcscpy(chatroom_name, token);
 
-                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, chatroom_name);
-
                             // remove the user from his previous chatroom if he was in one.
                             if(working_client_connection->current_chatroom != NULL) {
                                 GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
                                 previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
+                                
                             }
+
+
+                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, chatroom_name);
                             // add him to the one he is trying to join
                             working_client_connection->current_chatroom = chatroom_name;
 
@@ -467,7 +522,9 @@ int main(int argc, char **argv) {
 
                         }
 
-                        if(wcsncmp(list_command, data_buffer, wcslen(list_command)) == 0) {
+                        if(wcscmp(list_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+
                             wchar_t *chatroom_list;
                             int bytes_needed = ((sizeof(wchar_t) * 200) * g_tree_nnodes(chatrooms))+4;
                             chatroom_list = g_malloc(bytes_needed); 
@@ -477,7 +534,9 @@ int main(int argc, char **argv) {
                             g_free(chatroom_list);
                         }
 
-                        if(wcsncmp(who_command, data_buffer, wcslen(who_command)) == 0) {
+                        if(wcscmp(who_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+
                             wchar_t *available_user_list;
                             int bytes_needed = ((sizeof(wchar_t) * 200) * current_connected_count)+4;
                             available_user_list = g_malloc(bytes_needed);
@@ -491,11 +550,15 @@ int main(int argc, char **argv) {
                         }
 
                         if(wcsncmp(say_command, data_buffer, wcslen(say_command)) == 0) {
+                            command_entered = TRUE;
+
                             token = wcstok(data_buffer, L" ", &buffer); // this is the /msg part
                             token = wcstok(NULL, L" ", &buffer); // this is the username we want to send to
                             
                         }
-                        if(wcsncmp(help_command, data_buffer, wcslen(help_command)) == 0) {
+                        if(wcscmp(help_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+
                             wchar_t *command_help_text = L"Use '/user <username> to be prompted for password to login\n"
                                                           "Use '/regi <username> <password> to register on the blabbr service\n"
                                                           "Use '/list' to see list of public chatrooms\n"
@@ -505,19 +568,47 @@ int main(int argc, char **argv) {
                             int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                             
                             SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
-
                         }
+                        if(wcsncmp(nick_command, data_buffer, wcslen(nick_command)) == 0) {
+                            command_entered = TRUE;
+
+                            token = wcstok(data_buffer, L" ", &buffer); // this is the /nick part
+                            token = wcstok(NULL, L" ", &buffer); // this is the nickname the user wants
+                            if(token != NULL) {
+                                wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(token) + 1));
+                                
+                                wcscpy(client_nickname, token);
+                                g_free(working_client_connection->nickname);
+                                
+                                working_client_connection->nickname = token;
+                                wchar_t *nickname_change_text = L"Your nickname has been changed";
+                                int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                SSL_write(working_client_connection->ssl, nickname_change_text, bytes_needed);
+                            }
+                            else {
+                                wchar_t *nickname_error_text = L"usage '/nick <nickname>'";
+                                int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
+                            }
+                        }
+                        if(!command_entered) {
+                            wchar_t *nickname_error_text = L"Invalid command type '/help' for a list of commands";
+                            int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                            SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
+                        }
+
+
                     }
                     // if the sent text wasn't a command
                     else {
                         if(working_client_connection->current_chatroom != NULL) {
                             // get the chatroom of the sender
                             GList *chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
-                            int bytes_needed = ret + ((wcslen(working_client_connection->username) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
+                            int bytes_needed = ret + ((wcslen(working_client_connection->nickname) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
                             wchar_t *message_to_send = g_malloc(bytes_needed); 
                             memset(message_to_send, 0, bytes_needed);
 
-                            wcscpy(message_to_send, working_client_connection->username);
+                            wcscpy(message_to_send, working_client_connection->nickname);
                             wcscat(message_to_send, L": ");
                             wcscat(message_to_send, (wchar_t *) data_buffer);
 
@@ -555,6 +646,12 @@ int main(int argc, char **argv) {
                                           ntohs(client_addr.sin_port),
                                           "timed out");
 
+                    // remove the user from his chatroom if he was in one.
+                    if(working_client_connection->current_chatroom != NULL) {
+                        GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                        previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
+                    }
+
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
@@ -570,8 +667,8 @@ int main(int argc, char **argv) {
     g_key_file_free(user_database);
 
     // We free up the client connections and chatroom GTree
-    g_tree_destroy(clients);
     g_tree_destroy(chatrooms);
+    g_tree_destroy(clients);
     //BIO_vfree(master_bio);
     SSL_CTX_free(ssl_ctx);
     // for(int i = 0; i < SERVER_MAX_CONN_BACKLOG; i++) {
@@ -642,9 +739,17 @@ gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpoin
             wcscat(data, L"[NO USERNAME]");
         }
         wcscat(data, L" : ");
-        wcscat(data, L"IPADDRESS");
+        if(client->ip_address != NULL) {
+            wcscat(data, client->ip_address);
+        }
+        else{
+            wcscat(data, L"[NO IPADDRESS]");
+        }
         wcscat(data, L" : ");
-        wcscat(data, L"PORTNUMBER");
+        wchar_t port_number[20]; 
+        swprintf(port_number, 20, L"%d", client->port_number);
+        wcscat(data, port_number);
+        
         wcscat(data, L" : ");
         if(client->current_chatroom != NULL) {
             wcscat(data, client->current_chatroom);

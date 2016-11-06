@@ -33,12 +33,15 @@ void client_connection_init(client_connection *client) {
 	client->last_activity = time(NULL);
     client->timeout_notification = FALSE;
     client->fd = CONN_FREE;
+    client->ip_address = NULL;
+    client->port_number = -1;
     client->close = FALSE;
     client->authenticated = FALSE;
     client->ssl_connected = FALSE;
     client->bio_ssl = NULL;
     client->ssl = NULL;
     client->username = NULL;
+    client->nickname = NULL;
     client->current_chatroom = NULL;
 }
 
@@ -46,6 +49,7 @@ void client_connection_reset(client_connection *client) {
     client->last_activity = time(NULL);
     client->timeout_notification = FALSE;
     client->fd = CONN_FREE;
+    client->port_number = -1;
     client->close = FALSE;
     client->authenticated = FALSE;
     client->ssl_connected = FALSE;
@@ -58,16 +62,17 @@ void client_connection_reset(client_connection *client) {
     	SSL_free(client->ssl);
     }
 
+    g_free(client->ip_address);
+    client->ip_address = NULL;
+
     g_free(client->username);
     client->username = NULL;
 
+    g_free(client->nickname);
+    client->nickname = NULL;
+
     g_free(client->current_chatroom);
     client->current_chatroom = NULL;
-
-    // this produced free/delete errors
-    // if(client->username != NULL) {
-    // 	g_free(client->username);
-    // }
 }
 
 void client_connection_gtree_key_destroy(gpointer data) {

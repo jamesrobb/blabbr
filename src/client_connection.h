@@ -15,12 +15,15 @@ typedef struct _client_connection {
     time_t last_activity;
     gboolean timeout_notification;
     int fd;
+    int port_number;
     gboolean close; // if this flag is set, we know we can issue close() on the connection
     gboolean authenticated;
     gboolean ssl_connected;
     BIO *bio_ssl;
     SSL *ssl;
+    wchar_t *ip_address;
     wchar_t *username;
+    wchar_t *nickname;
     wchar_t *current_chatroom;
 } client_connection;
 
