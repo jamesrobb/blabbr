@@ -46,7 +46,11 @@ static int exit_fd[2];
 
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
-gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
+gint g_tree_int_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
+
+void send_help_message(client_connection *working_client_connection);
+
+void send_not_authenticated(client_connection *working_client_connection);
 
 void send_message_to_chatroom(gpointer data, gpointer user_data);
 
@@ -115,7 +119,7 @@ int main(int argc, char **argv) {
     struct timeval select_timeout = {1, 0}; // 1 second
     //client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
-    GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
+    GTree *clients = g_tree_new_full(g_tree_int_cmp, NULL, NULL, client_connection_gtree_value_destroy);
     GTree *chatrooms = g_tree_new_full(g_tree_wchar_cmp, NULL, chatroom_gtree_key_destroy, chatroom_gtree_value_destroy);
     GTree *username_clientconns = g_tree_new_full(g_tree_wchar_cmp, NULL, NULL, NULL);
     int current_connected_count = 0;
@@ -499,22 +503,12 @@ int main(int argc, char **argv) {
                         if(wcscmp(help_command, data_buffer) == 0) {
                             command_entered = TRUE;
 
-                            wchar_t *command_help_text = L"SERVER \nUse '/user <username> to be prompted for password to login\n"
-                                                          "Use '/list' to see list of public chatrooms\n"
-                                                          "Use '/join <chatroom>' to join/create public chatroom\n"
-                                                          "Use '/who' to see list of online usernames\n"
-                                                          "Use '/say <username> <message>' to send private message";
-                            int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                            
-                            SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
+                            send_help_message(working_client_connection);
                         }
 
                         // user is not authenticated and therefore can not issue any commands not below this point
                         if(working_client_connection->authenticated != TRUE && command_entered == FALSE){
-                            wchar_t auth_error[] = L"You have not been authenticated\n"
-                                                    "please create an account using '/user <username>'\n"
-                                                    "You will be prompted for a password and your account";
-                            SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
+                            send_not_authenticated(working_client_connection);
                         }
 
                         // user wants to join a chatroom
@@ -553,6 +547,15 @@ int main(int argc, char **argv) {
                                 g_tree_insert(chatrooms, chatroom_key, new_chatroom_pointer);
                             }
 
+                            // 36 for start of string, 1 for null terminator
+                            int bytes_needed = sizeof(wchar_t) * (36 + 1 + wcslen(chatroom_name));
+                            wchar_t *join_message = g_malloc(bytes_needed);
+                            memset(join_message, 0, bytes_needed);
+                            wcscat(join_message, L"SERVER You are now in the chatroom: ");
+                            wcscat(join_message, chatroom_name);
+
+                            SSL_write(working_client_connection->ssl, join_message, bytes_needed);
+                            g_free(join_message);
                         }
 
                         // user wants to see list of chatrooms
@@ -573,14 +576,18 @@ int main(int argc, char **argv) {
                             command_entered = TRUE;
 
                             wchar_t *available_user_list;
-                            int bytes_needed = ((sizeof(wchar_t) * 200) * current_connected_count)+4;
+                            int bytes_needed = ((sizeof(wchar_t) * 200) * current_connected_count) + sizeof(wchar_t); // + for null terminator
                             available_user_list = g_malloc(bytes_needed);
                             memset(available_user_list, 0, bytes_needed);
-                            g_info("current conn %d and curr g nnodes %d", current_connected_count, g_tree_nnodes(clients));
+                            wcscat(available_user_list, L"SERVER Users online:\n");
+
+                            g_info("current conn %d and current g num_nodes %d", current_connected_count, g_tree_nnodes(clients));
                             
                             g_tree_foreach(clients, print_available_users, available_user_list);
+                            int available_user_list_len = wcslen(available_user_list);
+                            available_user_list[available_user_list_len-1] = 0; // get rid of the trailing newline
                             
-                            SSL_write(working_client_connection->ssl, available_user_list, wcslen(available_user_list) * sizeof(wchar_t));
+                            SSL_write(working_client_connection->ssl, available_user_list, (available_user_list_len-1) * sizeof(wchar_t));
                             g_free(available_user_list);
                         }
 
@@ -726,43 +733,42 @@ int main(int argc, char **argv) {
 
 
                     }
+
                     // if the sent text wasn't a command
                     else {
+                        
                         if(working_client_connection->authenticated != TRUE){
-                            wchar_t auth_error[] = L"You have not been authenticated\n"
-                                                    "please create an account using '/user <username>'\n"
-                                                    "You will be prompted for a password and your account";
-                            SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
-                        }
-                        else{
+
+                            send_not_authenticated(working_client_connection);
+                        
+                        } else{
+
                             if(working_client_connection->current_chatroom != NULL) {
-                            // get the chatroom of the sender
-                            GList *chatroom = *((GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom));
-                            int bytes_needed = ret + ((wcslen(working_client_connection->username) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
+                                // get the chatroom of the sender
+                                GList *chatroom = *((GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom));
+                                int bytes_needed = ret + ((wcslen(working_client_connection->username) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
 
-                            wchar_t *message_to_send = g_malloc(bytes_needed); 
-                            memset(message_to_send, 0, bytes_needed);
+                                wchar_t *message_to_send = g_malloc(bytes_needed); 
+                                memset(message_to_send, 0, bytes_needed);
 
-                            wcscpy(message_to_send, working_client_connection->username);
-                            wcscat(message_to_send, L" ");
-                            wcscat(message_to_send, (wchar_t *) data_buffer);
+                                wcscpy(message_to_send, working_client_connection->username);
+                                wcscat(message_to_send, L" ");
+                                wcscat(message_to_send, (wchar_t *) data_buffer);
 
-                            g_list_foreach(chatroom, send_message_to_chatroom, message_to_send);
+                                g_list_foreach(chatroom, send_message_to_chatroom, message_to_send);
 
-                            g_free(message_to_send);
+                                g_free(message_to_send);
                             }
                             else {
-                                wchar_t *error_no_chatroom = L"You need to be part of a chatroom to chat\n"
-                                                              "Use '/list' to see list of public chatrooms\n"
-                                                              "Use '/join <chatroom>' to join/create public chatroom\n"
-                                                              "Use '/who' to see list of online usernames\n"
-                                                              "Use '/say <username> <message>' to send private message";
+                                wchar_t *error_no_chatroom = L"SERVER You need to be part of a chatroom to chat";
                                 int bytes_needed = wcslen(error_no_chatroom) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                                 
                                 SSL_write(working_client_connection->ssl, error_no_chatroom, bytes_needed);
+                                send_help_message(working_client_connection);
                             }
                         }   
                     }
+
                 }
             } 
             else {
@@ -834,28 +840,47 @@ gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer 
     return wcscmp((wchar_t *) a, (wchar_t *) b);
 }
 
-gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
+gint g_tree_int_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
     return *((int*) a) - *((int*) b);
+}
+
+void send_help_message(client_connection *working_client_connection) {
+    wchar_t *command_help_text = L"SERVER Commands:\n"
+                                  "Use '/user <username> to register or login\n"
+                                  "Use '/list' to see list of public chatrooms\n"
+                                  "Use '/join <chatroom>' to join/create public chatroom\n"
+                                  "Use '/who' to see list of online usernames\n"
+                                  "Use '/say <username> <message>' to send private message";
+    int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+    
+    SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
+}
+
+void send_not_authenticated(client_connection *working_client_connection) {
+    wchar_t auth_error[] = L"SERVER You have not been authenticated\n"
+                            "Please create an account using '/user <username>'\n"
+                            "You will then be able to enter your password without it being displayed";
+    SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
 }
 
 gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpointer data) {
     
     client_connection *client = (client_connection *) value;
     if(client->authenticated == TRUE) {
+        
         if(client->username != NULL) {
             wcscat(data, client->username);
-        }
-        else {
+        } else {
             wcscat(data, L"[NO USERNAME]");
         }
         wcscat(data, L" : ");
         if(client->ip_address != NULL) {
             wcscat(data, client->ip_address);
-        }
-        else{
+        } else{
             wcscat(data, L"[NO IPADDRESS]");
         }
-        wcscat(data, L" : ");
+
+        wcscat(data, L":");
         wchar_t port_number[20]; 
         swprintf(port_number, 20, L"%d", client->port_number);
         wcscat(data, port_number);
@@ -863,8 +888,7 @@ gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpoin
         wcscat(data, L" : ");
         if(client->current_chatroom != NULL) {
             wcscat(data, client->current_chatroom);
-        }
-        else {
+        } else {
             wcscat(data, L"[NO CURRENT CHATROOM]");
         }
         wcscat(data, L"\n");
