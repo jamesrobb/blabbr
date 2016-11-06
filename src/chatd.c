@@ -115,18 +115,14 @@ int main(int argc, char **argv) {
     //client_connection *clients[SERVER_MAX_CONN_BACKLOG];
     client_connection *working_client_connection; // client connecting we are currently dealing with
     GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
-    GTree *chatrooms = g_tree_new_full(g_tree_wchar_cmp, NULL, NULL, chatroom_gtree_value_destroy);
+    GTree *chatrooms = g_tree_new_full(g_tree_wchar_cmp, NULL, chatroom_gtree_key_destroy, chatroom_gtree_value_destroy);
     int current_connected_count = 0;
 
-    //gkeyfile ----------------- username - password store
+    // username/password/salt store
     GKeyFile *user_database = g_key_file_new();
     gchar *user_database_path = "./user_database.conf";
     gchar *user_database_group = "users";
     gchar *user_salt_database_group = "user_salt";
-    //gkeyfile end -- this is just a test for now
-
-
-    //BIO *master_bio;
     
 
     master_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -346,11 +342,13 @@ int main(int argc, char **argv) {
                     server_log_access(inet_ntoa(client_addr.sin_addr),
                                           ntohs(client_addr.sin_port),
                                           "disconnected");
+
                     // remove the user from his chatroom if he was in one.
                     if(working_client_connection->current_chatroom != NULL) {
-                        GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
-                        previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
+                        GList **previous_chatroom = (GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                        *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
                     }
+
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
@@ -446,23 +444,30 @@ int main(int argc, char **argv) {
                             memset(chatroom_name, 0, (wcslen(token)+1) * sizeof(wchar_t));
                             chatroom_name = wcscpy(chatroom_name, token);
 
-                            GList *working_chatroom = (GList*) g_tree_lookup(chatrooms, chatroom_name);
+                            GList **working_chatroom = (GList**) g_tree_lookup(chatrooms, chatroom_name);
 
                             // remove the user from his previous chatroom if he was in one.
                             if(working_client_connection->current_chatroom != NULL) {
-                                GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
-                                previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
+                                GList **previous_chatroom = (GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                                *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
                             }
+
                             // add him to the one he is trying to join
+                            g_free(working_client_connection->current_chatroom);
                             working_client_connection->current_chatroom = chatroom_name;
 
                             if(working_chatroom != NULL) {
-                                working_chatroom = g_list_append(working_chatroom, working_client_connection);
-                            }
-                            else {
+                                *working_chatroom = g_list_prepend(*working_chatroom, working_client_connection);
+                            } else {
+                                wchar_t *chatroom_key = g_malloc((wcslen(chatroom_name)+1) * sizeof(wchar_t));
+                                memset(chatroom_key, 0, (wcslen(chatroom_name)+1) * sizeof(wchar_t));
+                                chatroom_key = wcscpy(chatroom_key, chatroom_name);
                                 GList *new_chatroom = NULL;
-                                new_chatroom = g_list_append(new_chatroom, working_client_connection);
-                                g_tree_insert(chatrooms, chatroom_name, new_chatroom);
+                                GList **new_chatroom_pointer = g_malloc(sizeof(GList **));
+
+                                new_chatroom = g_list_prepend(new_chatroom, working_client_connection);
+                                *new_chatroom_pointer = new_chatroom;
+                                g_tree_insert(chatrooms, chatroom_key, new_chatroom_pointer);
                             }
 
                         }
@@ -512,7 +517,7 @@ int main(int argc, char **argv) {
                     else {
                         if(working_client_connection->current_chatroom != NULL) {
                             // get the chatroom of the sender
-                            GList *chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                            GList *chatroom = *((GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom));
                             int bytes_needed = ret + ((wcslen(working_client_connection->username) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
                             wchar_t *message_to_send = g_malloc(bytes_needed); 
                             memset(message_to_send, 0, bytes_needed);
@@ -566,6 +571,7 @@ int main(int argc, char **argv) {
         // we free up the client fds GArray
         g_array_free(client_fds, TRUE);
     }
+
     // we free up the gkeyfile database
     g_key_file_free(user_database);
 
@@ -620,11 +626,11 @@ void send_message_to_chatroom(gpointer data, gpointer user_data) {
 }
 
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
-    unsigned int minLenght = wcslen((wchar_t *) b);
-    if(wcslen((wchar_t *) a) < minLenght) {
-        minLenght = wcslen((wchar_t *) a);
-    }
-    return wcsncmp((wchar_t *) a,(wchar_t *) b,minLenght);
+    // unsigned int minLength = wcslen((wchar_t *) b);
+    // if(wcslen((wchar_t *) a) < minLength) {
+    //     minLength = wcslen((wchar_t *) a);
+    // }
+    return wcscmp((wchar_t *) a, (wchar_t *) b);
 }
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data) {
