@@ -375,6 +375,7 @@ int main(int argc, char **argv) {
                         wchar_t decline_command[] = L"/decline";
                         wchar_t roll_command[] = L"/roll";
 
+                        // user wants to authenticate or register
                         if(wcsncmp(user_command, data_buffer, wcslen(user_command)) == 0) {
                             command_entered = TRUE;
 
@@ -494,6 +495,21 @@ int main(int argc, char **argv) {
                             g_free(password_in_store);
                         }
 
+                        // user wants to see some help
+                        if(wcscmp(help_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+
+                            wchar_t *command_help_text = L"SERVER \nUse '/user <username> to be prompted for password to login\n"
+                                                          "Use '/list' to see list of public chatrooms\n"
+                                                          "Use '/join <chatroom>' to join/create public chatroom\n"
+                                                          "Use '/who' to see list of online usernames\n"
+                                                          "Use '/say <username> <message>' to send private message";
+                            int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                            
+                            SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
+                        }
+
+                        // user is not authenticated and therefore can not issue any commands not below this point
                         if(working_client_connection->authenticated != TRUE && command_entered == FALSE){
                             wchar_t auth_error[] = L"You have not been authenticated\n"
                                                     "please create an account using '/user <username>'\n"
@@ -501,6 +517,7 @@ int main(int argc, char **argv) {
                             SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
                         }
 
+                        // user wants to join a chatroom
                         if(wcsncmp(join_command, data_buffer, wcslen(join_command)) == 0) {
                             command_entered = TRUE;
 
@@ -538,6 +555,7 @@ int main(int argc, char **argv) {
 
                         }
 
+                        // user wants to see list of chatrooms
                         if(wcscmp(list_command, data_buffer) == 0) {
                             command_entered = TRUE;
 
@@ -550,6 +568,7 @@ int main(int argc, char **argv) {
                             g_free(chatroom_list);
                         }
 
+                        // user wants to see who is online
                         if(wcscmp(who_command, data_buffer) == 0) {
                             command_entered = TRUE;
 
@@ -565,6 +584,7 @@ int main(int argc, char **argv) {
                             g_free(available_user_list);
                         }
 
+                        // user wants to send a private mesage to another
                         if(wcsncmp(say_command, data_buffer, wcslen(say_command)) == 0) {
                             command_entered = TRUE;
 
@@ -596,19 +616,7 @@ int main(int argc, char **argv) {
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                             }
                         }
-                        if(wcscmp(help_command, data_buffer) == 0) {
-                            command_entered = TRUE;
 
-                            wchar_t *command_help_text = L"Use '/user <username> to be prompted for password to login\n"
-                                                          "Use '/regi <username> <password> to register on the blabbr service\n"
-                                                          "Use '/list' to see list of public chatrooms\n"
-                                                          "Use '/join <chatroom>' to join/create public chatroom\n"
-                                                          "Use '/who' to see list of online usernames\n"
-                                                          "Use '/say <username> <message>' to send private message";
-                            int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                            
-                            SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
-                        }
                         if(wcsncmp(nick_command, data_buffer, wcslen(nick_command)) == 0) {
                             command_entered = TRUE;
 
@@ -776,8 +784,8 @@ int main(int argc, char **argv) {
 
                     // remove the user from his chatroom if he was in one.
                     if(working_client_connection->current_chatroom != NULL) {
-                        GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
-                        previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
+                        GList **previous_chatroom = (GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                        *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
                     }
 
                     // remove from the username/connlist

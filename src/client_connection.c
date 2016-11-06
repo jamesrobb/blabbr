@@ -7,8 +7,8 @@
 #include "util.h"
 
 void client_send_welcome(client_connection *client) {
-	wchar_t *welcome = L"SERVER Welcome to Blabbr! Please authenticate.";
-	int welcome_len = 46 * sizeof(wchar_t);
+	wchar_t *welcome = L"SERVER Welcome to Blabbr! Type /help for helpful information. Please authenticate.";
+	int welcome_len = 83 * sizeof(wchar_t);
 	int client_addr_len;
 	struct sockaddr_in client_addr;
 
