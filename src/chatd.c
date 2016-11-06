@@ -674,11 +674,11 @@ int main(int argc, char **argv) {
                                 working_client_connection->current_opponent = challenged_username;
                                 to_send_to->current_opponent = challenger_username;
                                 working_client_connection->in_game = TRUE;
-                                int bytes_needed = (wcslen(working_client_connection->username) + 109)* sizeof(wchar_t);    // | has challenged you to a dice duel type /accept to 
-                                wchar_t *message_to_send = g_malloc(bytes_needed);                                          // take him/her on or /decline to decline his/hers duel| = 107 characters
+                                int bytes_needed = (wcslen(working_client_connection->username) + 109)* sizeof(wchar_t);    // | has challenged you to a dice game type /accept to 
+                                wchar_t *message_to_send = g_malloc(bytes_needed);                                          // take him/her on or /decline to decline his/hers game| = 107 characters
                                 memset(message_to_send, 0, bytes_needed);
                                 wcscat(message_to_send, working_client_connection->username);
-                                wcscat(message_to_send, L" has challenged you to a dice duel type '/accept' to take him/her on or '/decline' to decline his/hers duel");
+                                wcscat(message_to_send, L" has challenged you to a dice game type '/accept' to take him/her on or '/decline' to decline his/hers game");
                                 SSL_write(to_send_to->ssl, message_to_send, bytes_needed);
                                 g_free(message_to_send);
                             }
@@ -689,8 +689,10 @@ int main(int argc, char **argv) {
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                             }
                         }
-                        if(wcscpy(accept_command, data_buffer) == 0) {
-                            wchar_t *challenger = working_client_connection->username;
+
+                        if(wcscmp(accept_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+                            wchar_t *challenger = working_client_connection->current_opponent;
                             client_connection *challenger_client_conn = g_tree_lookup(username_clientconns, challenger);
                             if(challenger_client_conn == NULL) {
                                 g_free(working_client_connection->current_opponent);
@@ -703,10 +705,96 @@ int main(int argc, char **argv) {
                             else {
                                 working_client_connection->in_game = TRUE;
                                 challenger_client_conn->in_game = TRUE;
+
+                                // send working client connection notification that he is now in a game
+                                wchar_t *started_text = L"SERVER Your game has started type '/roll' to throw your dice";
+                                int bytes_needed = (wcslen(started_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, started_text, bytes_needed);
+
                                 // send challenger a notification that working client connection has accepted.
-                                wchar_t *accepted_text = L"SERVER Your duel has been accepted type '/roll' to throw your dice";
-                                int bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
-                                SSL_write(working_client_connection->ssl, accepted_text, bytes_needed);
+                                wchar_t *accepted_text = L"SERVER Your game has been accepted type '/roll' to throw your dice";
+                                int accepted_bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(challenger_client_conn->ssl, accepted_text, accepted_bytes_needed);
+                            }
+                        }
+
+                        if(wcscmp(decline_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+                            wchar_t *challenger = working_client_connection->current_opponent;
+                            client_connection *challenger_client_conn = g_tree_lookup(username_clientconns, challenger);
+                            if(challenger_client_conn == NULL) {
+                                g_free(working_client_connection->current_opponent);
+                                working_client_connection->current_opponent = NULL;
+
+                                wchar_t *challenger_error_text = L"SERVER Challenger is no longer available";
+                                int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
+                            }
+                            else {
+                                working_client_connection->in_game = FALSE;
+                                challenger_client_conn->in_game = FALSE;
+
+                                g_free(working_client_connection->current_opponent);
+                                working_client_connection->current_opponent = NULL;
+
+                                g_free(challenger_client_conn->current_opponent);
+                                challenger_client_conn->current_opponent = NULL;
+
+                                // send working client connection notification that he is now in a game
+                                wchar_t *started_text = L"SERVER You have declined the game";
+                                int bytes_needed = (wcslen(started_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, started_text, bytes_needed);
+
+                                // send challenger a notification that working client connection has accepted.
+                                wchar_t *accepted_text = L"SERVER Your game has been declined";
+                                int accepted_bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(challenger_client_conn->ssl, accepted_text, accepted_bytes_needed);
+                            }
+                        }
+
+                        if(wcscmp(roll_command, data_buffer) == 0) {
+                            command_entered = TRUE;
+                            if(working_client_connection->in_game == FALSE) {
+                                wchar_t *challenger_error_text = L"SERVER You are not in a game";
+                                int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
+                            }
+                            else {
+                                wchar_t *opponent = working_client_connection->current_opponent;
+                                client_connection *opponent_client_conn = g_tree_lookup(username_clientconns, opponent);
+                                if(opponent_client_conn == NULL) {
+                                    working_client_connection->in_game = FALSE;
+
+                                    g_free(working_client_connection->current_opponent);
+                                    working_client_connection->current_opponent = NULL;
+
+                                    wchar_t *opponent_error_text = L"SERVER Can't find your opponent";
+                                    int bytes_needed = (wcslen(opponent_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                    SSL_write(working_client_connection->ssl, opponent_error_text, bytes_needed);
+                                }
+                                else {
+                                    if(opponent_client_conn->in_game == FALSE) {
+                                        wchar_t *opponent_error_text = L"SERVER Your opponent has cancelled the game";
+                                        int bytes_needed = (wcslen(opponent_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                        SSL_write(working_client_connection->ssl, opponent_error_text, bytes_needed);
+                                    }
+                                    else {
+                                        int dice_roll = (int) floor(drand48() * 6.0) + 1;
+                                        dice_roll = dice_roll + (int) floor(drand48() * 6.0) + 1; // call it twice for more randomness
+
+                                        wchar_t dice_sum[3]; 
+                                        swprintf(dice_sum, 3, L"%d", dice_roll);
+                                        
+                                        int bytes_needed = (wcslen(working_client_connection->username) + 17)* sizeof(wchar_t); // | has rolled a | + atmost 2 numbers + null term
+                                        wchar_t *message_to_send = g_malloc(bytes_needed);
+                                        memset(message_to_send, 0, bytes_needed);
+                                        wcscat(message_to_send, working_client_connection->username);
+                                        wcscat(message_to_send, L" has rolled a ");
+                                        wcscat(message_to_send, dice_sum);
+                                        SSL_write(opponent_client_conn->ssl, message_to_send, bytes_needed);
+                                        g_free(message_to_send);
+                                    }
+                                }
                             }
                         }
                         
