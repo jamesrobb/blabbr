@@ -7,7 +7,6 @@
 #include "util.h"
 
 void client_send_welcome(client_connection *client) {
-
 	wchar_t *welcome = L"Welcome to Blabbr! Please authenticate.";
 	int welcome_len = 40 * sizeof(wchar_t);
 	int client_addr_len;
@@ -28,7 +27,6 @@ void client_send_welcome(client_connection *client) {
 					inet_ntoa(client_addr.sin_addr), 
 					ntohs(client_addr.sin_port));
 	}
-
 }
 
 void client_connection_init(client_connection *client) {
@@ -41,6 +39,7 @@ void client_connection_init(client_connection *client) {
     client->bio_ssl = NULL;
     client->ssl = NULL;
     client->username = NULL;
+    client->current_chatroom = NULL;
 }
 
 void client_connection_reset(client_connection *client) {
@@ -59,7 +58,11 @@ void client_connection_reset(client_connection *client) {
     	SSL_free(client->ssl);
     }
 
+    g_free(client->username);
     client->username = NULL;
+
+    g_free(client->current_chatroom);
+    client->current_chatroom = NULL;
 
     // this produced free/delete errors
     // if(client->username != NULL) {

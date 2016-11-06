@@ -21,6 +21,7 @@ typedef struct _client_connection {
     BIO *bio_ssl;
     SSL *ssl;
     wchar_t *username;
+    wchar_t *current_chatroom;
 } client_connection;
 
 void client_send_welcome(client_connection *client);
