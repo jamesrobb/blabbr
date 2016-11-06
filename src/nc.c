@@ -131,7 +131,6 @@ int main(int argc, char **argv) {
     const SSL_METHOD *ssl_method = SSLv23_client_method();
     SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
     SSL *ssl = SSL_new(ssl_ctx);
-    SSL_set_fd(ssl, server_fd);
 
     // we create the BIO for the server connection
     BIO *server_bio = BIO_new(BIO_s_socket());
@@ -156,6 +155,10 @@ int main(int argc, char **argv) {
 	init_pair(WARNING_PAIR, COLOR_RED, origb);
 	init_pair(HEADER_BG_PAIR, COLOR_GREEN, COLOR_GREEN);
 	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
+	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
+	init_pair(SERVER_USER_PAIR, COLOR_GREEN, origb);
+	init_pair(OTHER_USER_PAIR, COLOR_WHITE, origb);
+	init_pair(CURRENT_USER_PAIR, COLOR_CYAN, origb);
 	noecho();
 	keypad(stdscr, TRUE);
 
@@ -234,15 +237,40 @@ int main(int argc, char **argv) {
 
 		if(FD_ISSET(server_bio_fd, &read_fds)) {
 
+			gboolean shutdown_ssl = FALSE;
+            gboolean connection_closed = FALSE;
+
 			wchar_t *recv_message = g_malloc(WCHAR_STR_MAX * sizeof(wchar_t));
 			memset(recv_message, 0, WCHAR_STR_MAX * sizeof(wchar_t));
 			int recv_len = SSL_read(ssl, recv_message, WCHAR_STR_MAX - 1);
 			//ssize_t recv_len = recv(server_fd, recv_message, WCHAR_STR_MAX - 1, 0);
 
-			recv_message[recv_len+1] = '\0';
-			text_area_lines = g_slist_append(text_area_lines, recv_message);
-			text_area_lines_count++;
-			draw_text_area = 1;
+			if(recv_len <= 0) {
+                connection_closed = TRUE;
+            }
+
+            if(SSL_RECEIVED_SHUTDOWN == SSL_get_shutdown(ssl) || connection_closed) {
+                SSL_shutdown(ssl);
+                shutdown_ssl = TRUE;
+            }
+
+            if(shutdown_ssl || connection_closed) {
+
+                shutdown(server_fd, SHUT_RDWR);
+                close(server_fd);
+
+                exit_main_loop = 1;
+                exit_status = EXIT_SUCCESS;
+                break;
+
+            } else {
+
+				recv_message[recv_len+1] = '\0';
+				text_area_lines = g_slist_append(text_area_lines, recv_message);
+				text_area_lines_count++;
+				draw_text_area = 1;
+
+			}
 
 			//g_info("recv() received a message of length %d", (int) recv_len);
 		}
@@ -329,6 +357,11 @@ int main(int argc, char **argv) {
 	                        //text_area_append(text_area_lines_ref, user_command_payload, &text_area_lines_count, &draw_text_area);
 	                        SSL_write(ssl, user_command_payload, user_command_payload_len);
 	                        g_free(user_command_payload);
+
+	                        g_free(ui_username);
+	                        wchar_t *username = g_malloc((wcslen(token) + 1) * sizeof(wchar_t));
+	                        wcscat(username, token);
+	                        ui_username = username;
                     	}
 
                     	break;

@@ -218,6 +218,8 @@ int main(int argc, char **argv) {
                 /* Clean-up and exit. */
                 g_warning("sigterm exiting now");
                 break;
+            } else if (signum == SIGPIPE) {
+                g_warning("caught a SIGPIPE");
             }
                     
         }
@@ -248,6 +250,7 @@ int main(int argc, char **argv) {
                     working_client_connection->ssl = new_ssl;
                     working_client_connection->bio_ssl = BIO_new(BIO_s_socket());
                     BIO_set_fd(working_client_connection->bio_ssl, new_socket, BIO_NOCLOSE);
+                    BIO_set_nbio(working_client_connection->bio_ssl, 1); // non blocking
                     SSL_set_bio(new_ssl, working_client_connection->bio_ssl, working_client_connection->bio_ssl);
 
                     int ssl_status = SSL_accept(new_ssl);
@@ -477,13 +480,12 @@ int main(int argc, char **argv) {
                                 working_client_connection->authenticated = TRUE;
 
                                 g_tree_insert(username_clientconns, working_client_connection->username, working_client_connection);
-
-                                wchar_t auth_good[] = L"You have successfully authenticated. Blabbr Time!";
+                                wchar_t auth_good[] = L"SERVER You have successfully authenticated. Blabbr Time!";
                                 SSL_write(working_client_connection->ssl, auth_good, wcslen(auth_good) * sizeof(wchar_t));
 
                             } else {
 
-                                wchar_t auth_error[] = L"There was an error authenticating you. Either the username is taken, or your password was wrong.";
+                                wchar_t auth_error[] = L"SERVER There was an error authenticating you. Either the username is taken, or your password was wrong.";
                                 SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
                             }
 
@@ -681,20 +683,37 @@ int main(int argc, char **argv) {
                                 g_free(message_to_send);
                             }
                             else {
-                                wchar_t *command_say_text = L"Username not found use '/who' to see a list of usernames";
+                                wchar_t *command_say_text = L"SERVER Username not found use '/who' to see a list of usernames";
                                 int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                             
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                             }
                         }
-                        if(wcscpy(accept_command, data_buffer)) {
+                        if(wcscpy(accept_command, data_buffer) == 0) {
+                            wchar_t *challenger = working_client_connection->username;
+                            client_connection *challenger_client_conn = g_tree_lookup(username_clientconns, challenger);
+                            if(challenger_client_conn == NULL) {
+                                g_free(working_client_connection->current_opponent);
+                                working_client_connection->current_opponent = NULL;
 
+                                wchar_t *challenger_error_text = L"SERVER Challenger is no longer available";
+                                int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
+                            }
+                            else {
+                                working_client_connection->in_game = TRUE;
+                                challenger_client_conn->in_game = TRUE;
+                                // send challenger a notification that working client connection has accepted.
+                                wchar_t *accepted_text = L"SERVER Your duel has been accepted type '/roll' to throw your dice";
+                                int bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, accepted_text, bytes_needed);
+                            }
                         }
                         
                         if(!command_entered) {
-                            wchar_t *nickname_error_text = L"Invalid command type '/help' for a list of commands";
-                            int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                            SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
+                            wchar_t *invalid_command_text = L"SERVER Invalid command type '/help' for a list of commands";
+                            int bytes_needed = (wcslen(invalid_command_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                            SSL_write(working_client_connection->ssl, invalid_command_text, bytes_needed);
                         }
 
 
@@ -741,10 +760,11 @@ int main(int argc, char **argv) {
             else {
 
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT - 5 && working_client_connection->timeout_notification != TRUE) {
-                    wchar_t connection_time_out[] = L"your connection is about to be timed out";
-                    SSL_write(working_client_connection->ssl, connection_time_out, wcslen(connection_time_out) * sizeof(wchar_t));
+                    wchar_t connection_time_out[] = L"SERVER Your connection is about to be timed out";
+                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
                     working_client_connection->timeout_notification = TRUE;
                 }
+
                 // handling timeouts
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
                     // wchar_t connection_timed_out[] = L"your connection timed out";
@@ -762,6 +782,8 @@ int main(int argc, char **argv) {
 
                     // remove from the username/connlist
                     g_tree_remove(username_clientconns, working_client_connection->username);
+                    wchar_t connection_time_out[] = L"SERVER Your connection has now timed out.";
+                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
@@ -910,6 +932,11 @@ void initialize_exit_fd(void) {
     }
 
     if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+
+    if (sigaction(SIGPIPE, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }

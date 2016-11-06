@@ -3,6 +3,8 @@
 #include "chat_ui.h"
 #include "constants.h"
 
+wchar_t *ui_username = NULL;
+
 void gui_clear_all() {
 	clear();
 	refresh();
@@ -48,7 +50,55 @@ void gui_create_text_area(WINDOW *window, GSList *lines) {
 		GSList *iterator = NULL;
 
 		for(iterator = lines; iterator != NULL; iterator = iterator->next) {
-			wprintw(window, "%ls\n", (wchar_t *) iterator->data);	
+			wchar_t *entry = (wchar_t *) iterator->data;
+			int entry_len = wcslen(entry);
+			short user_color_pair =  0;
+
+			if(wcsncmp(entry, L"SERVER", 6) == 0) {
+				user_color_pair = SERVER_USER_PAIR;
+			} else if(ui_username != NULL) {
+
+				user_color_pair = CURRENT_USER_PAIR;
+				int ui_username_len = wcslen(ui_username);
+
+				for(int i = 0; i < ui_username_len; i++) {
+
+					if(wcsncmp(ui_username + i, entry + i, 1) != 0) {
+						user_color_pair = OTHER_USER_PAIR;
+						break;
+					}
+
+				}
+
+			} else {
+				user_color_pair = OTHER_USER_PAIR;
+			}
+
+			wattron(window, COLOR_PAIR(user_color_pair));
+			wattron(window, A_BOLD);
+			for(int i = 0; i < entry_len; i++) {
+
+				wprintw(window, "%lc", entry[i]);
+
+				if(wcsncmp(entry + i + 1, L" ", 1) == 0) {
+
+					wattroff(window, A_BOLD);
+					wattroff(window, COLOR_PAIR(user_color_pair));
+
+					if(i + 1 <= entry_len) {
+						wprintw(window, ": %ls\n", entry + i + 1);
+					} else {
+						wprintw(window, "\n");
+					}
+
+					break;
+				}
+
+			}
+			
+			wattroff(window, A_BOLD);
+			wattroff(window, COLOR_PAIR(user_color_pair));
+
 		}
 
 	}
