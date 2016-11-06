@@ -216,6 +216,8 @@ int main(int argc, char **argv) {
                 /* Clean-up and exit. */
                 g_warning("sigterm exiting now");
                 break;
+            } else if (signum == SIGPIPE) {
+                g_warning("caught a SIGPIPE");
             }
                     
         }
@@ -246,6 +248,7 @@ int main(int argc, char **argv) {
                     working_client_connection->ssl = new_ssl;
                     working_client_connection->bio_ssl = BIO_new(BIO_s_socket());
                     BIO_set_fd(working_client_connection->bio_ssl, new_socket, BIO_NOCLOSE);
+                    BIO_set_nbio(working_client_connection->bio_ssl, 1); // non blocking
                     SSL_set_bio(new_ssl, working_client_connection->bio_ssl, working_client_connection->bio_ssl);
 
                     int ssl_status = SSL_accept(new_ssl);
@@ -469,12 +472,12 @@ int main(int argc, char **argv) {
                                 working_client_connection->nickname = client_nickname;
                                 working_client_connection->authenticated = TRUE;
 
-                                wchar_t auth_good[] = L"You have successfully authenticated. Blabbr Time!";
+                                wchar_t auth_good[] = L"SERVER You have successfully authenticated. Blabbr Time!";
                                 SSL_write(working_client_connection->ssl, auth_good, wcslen(auth_good) * sizeof(wchar_t));
 
                             } else {
 
-                                wchar_t auth_error[] = L"There was an error authenticating you. Either the username is taken, or your password was wrong.";
+                                wchar_t auth_error[] = L"SERVER There was an error authenticating you. Either the username is taken, or your password was wrong.";
                                 SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
                             }
 
@@ -632,10 +635,11 @@ int main(int argc, char **argv) {
             else {
 
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT - 5 && working_client_connection->timeout_notification != TRUE) {
-                    wchar_t connection_time_out[] = L"your connection is about to be timed out";
-                    SSL_write(working_client_connection->ssl, connection_time_out, wcslen(connection_time_out) * sizeof(wchar_t));
+                    wchar_t connection_time_out[] = L"SERVER Your connection is about to be timed out";
+                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
                     working_client_connection->timeout_notification = TRUE;
                 }
+
                 // handling timeouts
                 if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
                     // wchar_t connection_timed_out[] = L"your connection timed out";
@@ -650,6 +654,9 @@ int main(int argc, char **argv) {
                         GList *previous_chatroom = (GList*) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
                         previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
                     }
+
+                    wchar_t connection_time_out[] = L"SERVER Your connection has now timed out.";
+                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
 
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
@@ -797,6 +804,11 @@ void initialize_exit_fd(void) {
     }
 
     if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+
+    if (sigaction(SIGPIPE, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }
