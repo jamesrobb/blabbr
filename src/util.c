@@ -178,3 +178,18 @@ gchar* wchars_to_gchars(wchar_t *source) {
 
     return dest_pointer;
 }
+
+int wint_chars_len(wint_t *arr, int max) {
+	int length = 0;
+
+	while(length < max) {
+
+		if(arr[length] == 0) {
+			break;
+		}
+
+		length++;
+	}
+
+	return length;
+}

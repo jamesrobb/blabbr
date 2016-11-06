@@ -26,4 +26,6 @@ void ssl_print_error(int ssl_error);
 
 gchar* wchars_to_gchars(wchar_t *source);
 
+int wint_chars_len(wint_t *arr, int max);
+
 #endif
