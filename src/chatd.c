@@ -577,11 +577,11 @@ int main(int argc, char **argv) {
                             token = wcstok(NULL, L" ", &buffer); // this is the nickname the user wants
                             if(token != NULL) {
                                 wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(token) + 1));
-                                
+                                memset(client_nickname, 0, sizeof(wchar_t) * (wcslen(token) + 1));
                                 wcscpy(client_nickname, token);
                                 g_free(working_client_connection->nickname);
                                 
-                                working_client_connection->nickname = token;
+                                working_client_connection->nickname = client_nickname;
                                 wchar_t *nickname_change_text = L"Your nickname has been changed";
                                 int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                                 SSL_write(working_client_connection->ssl, nickname_change_text, bytes_needed);

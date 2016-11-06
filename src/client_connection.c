@@ -53,11 +53,6 @@ void client_connection_reset(client_connection *client) {
     client->close = FALSE;
     client->authenticated = FALSE;
     client->ssl_connected = FALSE;
-
-    // if(client->bio != NULL) {
-    // 	BIO_vfree(client->bio);
-    // }
-
     if(client->ssl != NULL) {
     	SSL_free(client->ssl);
     }
