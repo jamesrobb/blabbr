@@ -59,7 +59,6 @@ int line_buffer_handle_input(struct input_buffer *buffer, wchar_t *target, int m
 	            );
 	            buffer->length--;
 	        }
-	        g_info("backspace");
 	        break;
 	    case KEY_ENTER:
 	    case '\r':
