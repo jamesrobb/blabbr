@@ -350,10 +350,10 @@ int main(int argc, char **argv) {
 				wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
 				memcpy(str, user_line, user_line_len * sizeof(wchar_t));
 				SSL_write(ssl, str, user_line_len * sizeof(wchar_t));
-				text_area_lines = g_slist_append(text_area_lines, str);
-				text_area_lines_count++;
-				draw_text_area = 1;
-
+				// text_area_lines = g_slist_append(text_area_lines, str);
+				// text_area_lines_count++;
+				// draw_text_area = 1;
+				g_free(str);
 			}
 
 		}
