@@ -116,5 +116,5 @@ int line_buffer_retrieve_content(struct input_buffer *buffer, wchar_t *target, i
     buffer->cursor_x = 0;
     buffer->cursor_y = 0;
     buffer->length = 0;
-    return (len + 1) * sizeof(wchar_t);
+    return (len);
 }
