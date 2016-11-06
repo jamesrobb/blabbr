@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
 
     // gui variables
 	WINDOW *header_win;
-	WINDOW *sidebar_win;
+	//WINDOW *sidebar_win;
 	WINDOW *text_area_win;
 	WINDOW *input_area_header_win;
 	WINDOW *input_area_win;
@@ -170,10 +170,13 @@ int main(int argc, char **argv) {
 
 	// create UI windows
 	header_win = newwin(1, COLS, 0, 0);
-	sidebar_win = newwin(LINES - 1, SIDEBAR_WIDTH, 1, COLS - SIDEBAR_WIDTH);
-	text_area_win = newwin(LINES - 4, COLS - SIDEBAR_WIDTH, 1, 0);
-	input_area_header_win = newwin(1, COLS - SIDEBAR_WIDTH, LINES - 3, 0);
-	input_area_win = newwin(2, COLS - SIDEBAR_WIDTH, LINES - 2, 0);
+	//sidebar_win = newwin(LINES - 1, SIDEBAR_WIDTH, 1, COLS - SIDEBAR_WIDTH);
+	// text_area_win = newwin(LINES - 4, COLS - SIDEBAR_WIDTH, 1, 0);
+	// input_area_header_win = newwin(1, COLS - SIDEBAR_WIDTH, LINES - 3, 0);
+	// input_area_win = newwin(2, COLS - SIDEBAR_WIDTH, LINES - 2, 0);
+	text_area_win = newwin(LINES - 4, COLS, 1, 0);
+	input_area_header_win = newwin(1, COLS, LINES - 3, 0);
+	input_area_win = newwin(2, COLS, LINES - 2, 0);
 	timeout(0);
 	intrflush(stdscr, 1);
 
@@ -182,7 +185,8 @@ int main(int argc, char **argv) {
 		draw_gui = 0;
 		gui_clear_all();
 		gui_create_header(header_win);
-		gui_create_siderbar(sidebar_win);
+		// future: would be cool to have sidebar display currently logged in users
+		// gui_create_siderbar(sidebar_win);
 		gui_create_text_area(text_area_win, text_area_lines);
 		gui_create_input_area_header(input_area_header_win);
 		gui_create_input_area(input_area_win, NULL);
@@ -274,10 +278,7 @@ int main(int argc, char **argv) {
             } else {
 
 				recv_message[recv_len+1] = '\0';
-				text_area_lines = g_slist_append(text_area_lines, recv_message);
-				text_area_lines_count++;
-				draw_text_area = 1;
-
+				text_area_append(text_area_lines_ref, recv_message, &text_area_lines_count, &draw_text_area);
 			}
 
 			//g_info("recv() received a message of length %d", (int) recv_len);
@@ -486,5 +487,11 @@ void text_area_append(GSList **text_area_lines_ref, wchar_t* message, int *text_
 	(*text_area_lines_ref) = g_slist_append(*text_area_lines_ref, message);
 	(*text_area_lines_count)++;
 	(*draw_text_area) = 1;
+
+	if(BLABBR_LINES_MAX < *text_area_lines_count) {
+
+		(*text_area_lines_count)--;
+		*text_area_lines_ref = g_slist_delete_link(*text_area_lines_ref, *text_area_lines_ref);
+	}
 
 }
