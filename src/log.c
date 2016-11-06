@@ -1,5 +1,6 @@
 #include <glib.h>
 #include <stdlib.h>
+#include <locale.h>
 
 #include "log.h"
 
@@ -23,6 +24,9 @@ void httpd_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 						       GLogLevelFlags log_level,
 						       const gchar *message,
 						       G_GNUC_UNUSED gpointer user_data) {
+
+	// for unicode purposes
+    setlocale(LC_ALL, "en_US.utf8");
 
 	// we get the current time
 	GDateTime *now = g_date_time_new_now_utc();
@@ -55,6 +59,9 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 						       GLogLevelFlags log_level,
 						       const gchar *message,
 						       gpointer user_data) {
+
+	// for unicode purposes
+    setlocale(LC_ALL, "en_US.utf8");
 
 	// we get the current time
 	GDateTime *now = g_date_time_new_now_utc();
@@ -91,6 +98,9 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 void server_log_access(gchar *client_ip,
 					  int client_port, 
 					  gchar *message) {
+
+	// for unicode purposes
+    setlocale(LC_ALL, "en_US.utf8");
 
 	// we get the current time
 	GDateTime *now = g_date_time_new_now_utc();
