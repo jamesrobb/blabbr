@@ -86,7 +86,7 @@ void gui_create_text_area(WINDOW *window, GSList *lines) {
 					wattroff(window, COLOR_PAIR(user_color_pair));
 
 					if(i + 1 <= entry_len) {
-						wprintw(window, ": %ls\n", entry + i + 1);
+						wprintw(window, ":%ls\n", entry + i + 1);
 					} else {
 						wprintw(window, "\n");
 					}
