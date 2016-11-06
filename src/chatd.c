@@ -43,6 +43,7 @@ static int exit_fd[2];
 #define  SERVER_PKEY            "./blabbr.key"
 
 // FUNCTION DECLERATIONS
+
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
@@ -116,6 +117,7 @@ int main(int argc, char **argv) {
     client_connection *working_client_connection; // client connecting we are currently dealing with
     GTree *clients = g_tree_new_full(g_tree_cmp, NULL, NULL, client_connection_gtree_value_destroy);
     GTree *chatrooms = g_tree_new_full(g_tree_wchar_cmp, NULL, chatroom_gtree_key_destroy, chatroom_gtree_value_destroy);
+    GTree *username_clientconns = g_tree_new_full(g_tree_wchar_cmp, NULL, NULL, NULL);
     int current_connected_count = 0;
 
     // username/password/salt store
@@ -339,6 +341,8 @@ int main(int argc, char **argv) {
                         *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
                     }
 
+                    // remove from the username/connlist
+                    g_tree_remove(username_clientconns, working_client_connection->username);
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
@@ -350,6 +354,7 @@ int main(int argc, char **argv) {
                 }
 
                 if(ret > 0) {
+                    gboolean command_entered = FALSE;
                     // checking wether input was command
                     if(wcsncmp(L"/", data_buffer, 1) == 0) {
                         wchar_t* buffer;
@@ -362,8 +367,10 @@ int main(int argc, char **argv) {
                         wchar_t say_command[] = L"/say ";
                         wchar_t help_command[] = L"/help";
                         wchar_t nick_command[] = L"/nick ";
-
-                        gboolean command_entered = FALSE;
+                        wchar_t game_command[] = L"/game ";
+                        wchar_t accept_command[] = L"/accept";
+                        wchar_t decline_command[] = L"/decline";
+                        wchar_t roll_command[] = L"/roll";
 
                         if(wcsncmp(user_command, data_buffer, wcslen(user_command)) == 0) {
                             command_entered = TRUE;
@@ -437,7 +444,7 @@ int main(int argc, char **argv) {
                                     sprintf(access_message, "%s %s", username_mbs, "authenticated");
 
                                 } else {
-                                    sprintf(access_message, "%s %s", username_mbs, " authentication error");
+                                    sprintf(access_message, "%s %s", username_mbs, "authentication error");
                                 }
 
                             }
@@ -469,6 +476,8 @@ int main(int argc, char **argv) {
                                 working_client_connection->nickname = client_nickname;
                                 working_client_connection->authenticated = TRUE;
 
+                                g_tree_insert(username_clientconns, working_client_connection->username, working_client_connection);
+
                                 wchar_t auth_good[] = L"You have successfully authenticated. Blabbr Time!";
                                 SSL_write(working_client_connection->ssl, auth_good, wcslen(auth_good) * sizeof(wchar_t));
 
@@ -481,6 +490,13 @@ int main(int argc, char **argv) {
                             g_free(password_mbs);
                             g_free(username_mbs);
                             g_free(password_in_store);
+                        }
+
+                        if(working_client_connection->authenticated != TRUE && command_entered == FALSE){
+                            wchar_t auth_error[] = L"You have not been authenticated\n"
+                                                    "please create an account using '/user <username>'\n"
+                                                    "You will be prompted for a password and your account";
+                            SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
                         }
 
                         if(wcsncmp(join_command, data_buffer, wcslen(join_command)) == 0) {
@@ -552,7 +568,31 @@ int main(int argc, char **argv) {
 
                             token = wcstok(data_buffer, L" ", &buffer); // this is the /msg part
                             token = wcstok(NULL, L" ", &buffer); // this is the username we want to send to
+                            if(token == NULL) {
+                                wchar_t *command_say_text = L"Usage '/say <username> <message>'";
+                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                             
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                            }
+
+                            client_connection *to_send_to = g_tree_lookup(username_clientconns, token);
+                            if(to_send_to != NULL) {
+                                // length of msg + lenght of username + ' ' + null terminator
+                                int bytes_needed = (wcslen(buffer) + wcslen(working_client_connection->username) + 2)* sizeof(wchar_t);
+                                wchar_t *message_to_send = g_malloc(bytes_needed);
+                                memset(message_to_send, 0, bytes_needed);
+                                wcscat(message_to_send, working_client_connection->username);
+                                wcscat(message_to_send, L" ");
+                                wcscat(message_to_send, buffer);
+                                SSL_write(to_send_to->ssl, message_to_send, bytes_needed);
+                                g_free(message_to_send);
+                            }
+                            else {
+                                wchar_t *command_say_text = L"Username not found use '/who' to see a list of usernames";
+                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                            
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                            }
                         }
                         if(wcscmp(help_command, data_buffer) == 0) {
                             command_entered = TRUE;
@@ -580,15 +620,77 @@ int main(int argc, char **argv) {
                                 
                                 working_client_connection->nickname = client_nickname;
                                 wchar_t *nickname_change_text = L"Your nickname has been changed";
-                                int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t);
                                 SSL_write(working_client_connection->ssl, nickname_change_text, bytes_needed);
                             }
                             else {
                                 wchar_t *nickname_error_text = L"usage '/nick <nickname>'";
-                                int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t);
                                 SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
                             }
                         }
+                        if(wcsncmp(game_command, data_buffer, wcslen(game_command)) == 0) {
+                            command_entered = TRUE;
+                            
+                            token = wcstok(data_buffer, L" ", &buffer); // this is the /game part
+                            token = wcstok(NULL, L" ", &buffer); // this is the username we want to send to
+                            if(token == NULL) {
+                                wchar_t *command_say_text = L"SERVER Usage '/game <username>'";
+                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t);
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                                continue;
+                            }
+                            if(wcscmp(token, working_client_connection->username) == 0) {
+                                wchar_t *command_say_text = L"SERVER A real hero does not fight himself";
+                                int bytes_needed = (wcslen(command_say_text) + 1) * sizeof(wchar_t);
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                                continue;
+                            }
+                            // check wether working client is already in a game
+                            if(working_client_connection->in_game == TRUE){
+                                wchar_t *command_say_text = L"SERVER You user is already in a game type '/giveup' to give up";
+                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t);
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                                continue;
+                            }
+
+                            client_connection *to_send_to = g_tree_lookup(username_clientconns, token);
+                            if(to_send_to != NULL) {
+                                // check wether the challenged user is already in duel
+                                if(to_send_to->in_game == TRUE){
+                                    wchar_t *command_say_text = L"SERVER This user is already in a game";
+                                    int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t);
+                                    SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                                    continue;
+                                }
+
+                                // setup both users for a diceduel
+                                wchar_t *challenger_username = g_malloc(sizeof(wchar_t) * (wcslen(working_client_connection->username) + 1));
+                                wcscpy(challenger_username, working_client_connection->username);
+                                wchar_t *challenged_username = g_malloc(sizeof(wchar_t) * (wcslen(to_send_to->username) + 1));
+                                wcscpy(challenged_username, to_send_to->username);
+                                working_client_connection->current_opponent = challenged_username;
+                                to_send_to->current_opponent = challenger_username;
+                                working_client_connection->in_game = TRUE;
+                                int bytes_needed = (wcslen(working_client_connection->username) + 109)* sizeof(wchar_t);    // | has challenged you to a dice duel type /accept to 
+                                wchar_t *message_to_send = g_malloc(bytes_needed);                                          // take him/her on or /decline to decline his/hers duel| = 107 characters
+                                memset(message_to_send, 0, bytes_needed);
+                                wcscat(message_to_send, working_client_connection->username);
+                                wcscat(message_to_send, L" has challenged you to a dice duel type '/accept' to take him/her on or '/decline' to decline his/hers duel");
+                                SSL_write(to_send_to->ssl, message_to_send, bytes_needed);
+                                g_free(message_to_send);
+                            }
+                            else {
+                                wchar_t *command_say_text = L"Username not found use '/who' to see a list of usernames";
+                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                            
+                                SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                            }
+                        }
+                        if(wcscpy(accept_command, data_buffer)) {
+
+                        }
+                        
                         if(!command_entered) {
                             wchar_t *nickname_error_text = L"Invalid command type '/help' for a list of commands";
                             int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
@@ -599,7 +701,14 @@ int main(int argc, char **argv) {
                     }
                     // if the sent text wasn't a command
                     else {
-                        if(working_client_connection->current_chatroom != NULL) {
+                        if(working_client_connection->authenticated != TRUE){
+                            wchar_t auth_error[] = L"You have not been authenticated\n"
+                                                    "please create an account using '/user <username>'\n"
+                                                    "You will be prompted for a password and your account";
+                            SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
+                        }
+                        else{
+                            if(working_client_connection->current_chatroom != NULL) {
                             // get the chatroom of the sender
                             GList *chatroom = *((GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom));
                             int bytes_needed = ret + ((wcslen(working_client_connection->username) + 2) * sizeof(wchar_t)) + 4; // plus 4 for null terminator
@@ -607,25 +716,25 @@ int main(int argc, char **argv) {
                             wchar_t *message_to_send = g_malloc(bytes_needed); 
                             memset(message_to_send, 0, bytes_needed);
 
-                            wcscpy(message_to_send, working_client_connection->nickname);
-                            wcscat(message_to_send, L": ");
+                            wcscpy(message_to_send, working_client_connection->username);
+                            wcscat(message_to_send, L" ");
                             wcscat(message_to_send, (wchar_t *) data_buffer);
 
                             g_list_foreach(chatroom, send_message_to_chatroom, message_to_send);
 
                             g_free(message_to_send);
-                        }
-                        else {
-                            wchar_t *error_no_chatroom = L"You need to be part of a chatroom to chat\n"
-                                                          "Use '/list' to see list of public chatrooms\n"
-                                                          "Use '/join <chatroom>' to join/create public chatroom\n"
-                                                          "Use '/who' to see list of online usernames\n"
-                                                          "Use '/say <username> <message>' to send private message";
-                            int bytes_needed = wcslen(error_no_chatroom) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                            
-                            SSL_write(working_client_connection->ssl, error_no_chatroom, bytes_needed);
-                        }
-                        
+                            }
+                            else {
+                                wchar_t *error_no_chatroom = L"You need to be part of a chatroom to chat\n"
+                                                              "Use '/list' to see list of public chatrooms\n"
+                                                              "Use '/join <chatroom>' to join/create public chatroom\n"
+                                                              "Use '/who' to see list of online usernames\n"
+                                                              "Use '/say <username> <message>' to send private message";
+                                int bytes_needed = wcslen(error_no_chatroom) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                
+                                SSL_write(working_client_connection->ssl, error_no_chatroom, bytes_needed);
+                            }
+                        }   
                     }
                 }
             } 
@@ -651,6 +760,8 @@ int main(int argc, char **argv) {
                         previous_chatroom = g_list_remove(previous_chatroom, working_client_connection);
                     }
 
+                    // remove from the username/connlist
+                    g_tree_remove(username_clientconns, working_client_connection->username);
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);
 
@@ -667,6 +778,7 @@ int main(int argc, char **argv) {
     g_key_file_free(user_database);
 
     // We free up the client connections and chatroom GTree
+    g_tree_destroy(username_clientconns);
     g_tree_destroy(chatrooms);
     g_tree_destroy(clients);
     //BIO_vfree(master_bio);
@@ -729,6 +841,7 @@ gboolean print_available_users(G_GNUC_UNUSED gpointer key, gpointer value, gpoin
     }
     return FALSE;
 }
+
 
 gboolean print_chatroom_array(gpointer key, G_GNUC_UNUSED gpointer value, gpointer data) {
     wcscat(data, (wchar_t *) key);
