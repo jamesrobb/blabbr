@@ -54,12 +54,19 @@ int main(int argc, char **argv) {
 	// for unicode purposes
 	setlocale(LC_ALL, "");
 
-	if (argc != 2) {
+	if (argc > 3 || argc < 2) {
         g_critical("Usage: %s <port>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    initialize_exit_fd();
+    char server_ip[16] = {0};
+    int server_port = strtol(argv[1], NULL, 10);
+
+    if(argc == 3) {
+    	strncpy(server_ip, argv[2], 15);
+    } else {
+    	strncpy(server_ip, "127.0.0.1", 9);
+    }
 
 	// we define this variable earlier than others for logging purposes
 	GSList *text_area_lines = NULL;
@@ -100,7 +107,6 @@ int main(int argc, char **argv) {
 	int server_fd;
 	int select_activity;
 	int select_timeout_usec = 20000; // 20th of a second
-	const int server_port = strtol(argv[1], NULL, 10);
 	int ssl_error;
 	fd_set read_fds;
 	struct timeval select_timeout;
@@ -113,7 +119,7 @@ int main(int argc, char **argv) {
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+    inet_pton(AF_INET, server_ip, &server.sin_addr);
     server.sin_port = htons(server_port);
 
     int connect_res = connect(server_fd, (struct sockaddr *) &server, sizeof(server));
@@ -187,6 +193,8 @@ int main(int argc, char **argv) {
 	wrefresh(input_area_win);
 
 	BIO_set_nbio(server_bio, 1);
+
+	initialize_exit_fd();
 
 	while(1 && !exit_main_loop) {
 
@@ -360,6 +368,7 @@ int main(int argc, char **argv) {
 
 	                        g_free(ui_username);
 	                        wchar_t *username = g_malloc((wcslen(token) + 1) * sizeof(wchar_t));
+	                        memset(username, 0, (wcslen(token) + 1) * sizeof(wchar_t));
 	                        wcscat(username, token);
 	                        ui_username = username;
                     	}
