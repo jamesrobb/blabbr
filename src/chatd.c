@@ -43,8 +43,6 @@ static int exit_fd[2];
 #define  SERVER_PKEY            "./blabbr.key"
 
 // FUNCTION DECLERATIONS
-int sockaddr_in_cmp(const void *addr1, const void *addr2);
-
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
 gint g_tree_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
@@ -69,7 +67,6 @@ int main(int argc, char **argv) {
     // for unicode purposes
     setlocale(LC_ALL, "en_US.utf8");
 
-
     // we set a custom logging callback
     g_log_set_handler (NULL, 
                        G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
@@ -82,6 +79,9 @@ int main(int argc, char **argv) {
     }
 
     initialize_exit_fd();
+
+    // seed random
+    srand48(time(NULL));
 
     // begin setting up SSL
     SSL_library_init(); // loads encryption and hash algs for SSL
@@ -180,19 +180,11 @@ int main(int argc, char **argv) {
         for(unsigned int i = 0; i < client_fds->len; i++) {
 
             int client_fd = g_array_index (client_fds, int, i);
-            g_info("CLIENT_FD_ARRAY %d", client_fd);
-
-        }
-
-        for(unsigned int i = 0; i < client_fds->len; i++) {
-
-            int client_fd = g_array_index (client_fds, int, i);
 
             if(client_fd > incoming_sd_max) {
                 incoming_sd_max = client_fd;
             }
 
-            g_info("FD_SET %d", client_fd);
             FD_SET(client_fd, &incoming_fds);
 
         }
@@ -292,10 +284,11 @@ int main(int argc, char **argv) {
         }
 
         for(unsigned int i = 0; i < client_fds->len; i++) {
+            
             int client_fd = g_array_index (client_fds, int, i);
             working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
             getpeername(working_client_connection->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
-            g_info("client fd is %d", client_fd);
+            //g_info("client fd is %d", client_fd);
 
             if(FD_ISSET(client_fd, &incoming_fds)) {
                 working_client_connection->last_activity = time(NULL);
@@ -362,7 +355,6 @@ int main(int argc, char **argv) {
                         wchar_t* buffer;
                         wchar_t* token;
 
-                        wchar_t register_command[] = L"/regi ";
                         wchar_t user_command[] = L"/user ";
                         wchar_t join_command[] = L"/join ";
                         wchar_t list_command[] = L"/list";
@@ -376,82 +368,85 @@ int main(int argc, char **argv) {
                         if(wcsncmp(user_command, data_buffer, wcslen(user_command)) == 0) {
                             command_entered = TRUE;
 
-                            g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, NULL);
-                            token = wcstok(data_buffer, L" ", &buffer); // /user part
-                            token = wcstok(NULL, L" ", &buffer); // this should then be the username part of the command
-                            wchar_t *username = token;
-                            // convert wchar_t to gchars
-                            gchar *username_mbs = wchars_to_gchars(username);
-                            // checking wether username is in database
-                            wchar_t *password_hashed = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_mbs, NULL);
-                            if(password_hashed != NULL) {
-                                wchar_t *salt = (wchar_t *) g_key_file_get_value(user_database, user_salt_database_group, username_mbs, NULL);
-                                wchar_t *password = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
-                                gchar *password_mbs = wchars_to_gchars(password);
-
-                                // TODO HASH THE VALUE IN PASSWORD AND COMPARE TO USERNAME_CHECK.
-
-                                // -------------------------------------------------------------- 
-                                g_free(salt);
-                                g_free(password_mbs);
-                            }
-                            else {
-                                wchar_t *user_error_text = L"Username not found. Use '/regi <username> <password>' to create an account";
-                                int bytes_needed = wcslen(user_error_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                                SSL_write(working_client_connection->ssl, user_error_text, bytes_needed);
-                            }
-                            g_free(password_hashed);
-                            g_free(username_mbs);
-
-                        }
-
-                        if(wcsncmp(register_command, data_buffer, wcslen(register_command)) == 0) {
-                            command_entered = TRUE;
                             // setup GkeyFile
-                            //GError *file_errors;
-                            // g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, &file_errors);
+                            // future: add error handling for file handling
                             g_key_file_load_from_file (user_database, user_database_path, G_KEY_FILE_NONE, NULL);
                             token = wcstok(data_buffer, L" ", &buffer);
                             // do it one more time to skip the '/regi ' part because we already know it's there
                             token = wcstok(NULL, L" ", &buffer); // this should then be the username part of the command
                             wchar_t *username = token;
+                            int username_len = wcslen(username);
 
                             // check wether username is already in user_database
                             gchar *username_mbs = wchars_to_gchars(username);
                             //g_info("gchar username is %s", username_mbs);
 
-                            wchar_t *username_check = (wchar_t *) g_key_file_get_value(user_database, user_database_group, username_mbs, NULL);
-                            
-                            if(username_check == NULL) {
+                            gchar *password_in_store = (gchar *) g_key_file_get_value(user_database, user_database_group, username_mbs, NULL);
 
-                                wchar_t *password = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
-                                gchar *password_mbs = wchars_to_gchars(password);
-                                unsigned char hash[SHA256_DIGEST_LENGTH];
-                                gchar hash_string[65];
-                                gchar salt_string[31];
+                            wchar_t *password = wcstok(NULL, L" ", &buffer); // this should then be the password part of the command
+                            gchar *password_mbs = wchars_to_gchars(password);
+                            unsigned char hash[SHA256_DIGEST_LENGTH];
+                            gchar hash_string[65];
+                            gchar salt_string[31];
+                            gboolean registered = FALSE;
+                            gboolean authenticated = FALSE;
+                            gchar access_message[username_len * sizeof(wchar_t) + 22]; // +21 for null terminator and info (ex. authentication error)
+                            memset(access_message, 0, username_len * sizeof(wchar_t) + 22);
 
+                            if(password_in_store == NULL) {
                                 for(int i = 0; i < 30; i++) {
                                     sprintf(salt_string + (i * 2), "%02x", (int) floor(drand48() * 255.0));
                                 }
-                                salt_string[30] = '\0';
+                            } else {
+                                gchar *salt_in_store = (gchar *) g_key_file_get_value(user_database, user_salt_database_group, username_mbs, NULL);
+                                strncpy(salt_string, salt_in_store, 30);
+                                g_free(salt_in_store);
+                            }
+                            salt_string[30] = '\0';
 
-                                SHA256_CTX sha256;
-                                SHA256_Init(&sha256);
-                                for(int i = 0; i < 10000; i++) {
-                                    SHA256_Update(&sha256, password_mbs, gchar_array_len(password_mbs)-1);
-                                    SHA256_Update(&sha256, salt_string, 30);
-                                }
-                                SHA256_Final(hash, &sha256);
-                                
-                                for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-                                    sprintf(hash_string + (i * 2), "%02x", hash[i]);
-                                }
-                                hash_string[64] = 0;
 
-                                g_info("username %s - hash_password %s - salt %s", username_mbs, hash_string, salt_string);
+                            SHA256_CTX sha256;
+                            SHA256_Init(&sha256);
+                            for(int i = 0; i < 10000; i++) {
+                                SHA256_Update(&sha256, password_mbs, gchar_array_len(password_mbs)-1);
+                                SHA256_Update(&sha256, salt_string, 30);
+                            }
+                            SHA256_Final(hash, &sha256);
+                            
+                            for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+                                sprintf(hash_string + (i * 2), "%02x", hash[i]);
+                            }
+                            hash_string[64] = 0;
+
+                            // username doesn't exist
+                            if(password_in_store == NULL) {
+
+                                g_info("new registration: username %s - hash_password %s - salt %s", username_mbs, hash_string, salt_string);
                                 g_key_file_set_value(user_database, user_database_group, username_mbs, hash_string);
                                 g_key_file_set_value(user_database, user_salt_database_group, username_mbs, salt_string);
                                 g_key_file_save_to_file(user_database, user_database_path, NULL);
+                                registered = TRUE;
+
+                                sprintf(access_message, "%s %s", username_mbs, "authenticated");
+
+                            } else {
+
+                                if(strncmp(hash_string, password_in_store, 64) == 0) {
+                                    authenticated = TRUE;
+
+                                    sprintf(access_message, "%s %s", username_mbs, "authenticated");
+
+                                } else {
+                                    sprintf(access_message, "%s %s", username_mbs, " authentication error");
+                                }
+
+                            }
+
+                            server_log_access(inet_ntoa(client_addr.sin_addr),
+                                              ntohs(client_addr.sin_port),
+                                              access_message);
+
+                            if(registered || authenticated) {
 
                                 int ip_bytes_needed = 16 * sizeof(wchar_t);
                                 wchar_t client_ip_char_wchar[ip_bytes_needed];
@@ -459,7 +454,6 @@ int main(int argc, char **argv) {
                                 wchar_t *client_ip_address = g_malloc(ip_bytes_needed); // ipaddr max is 4 * 3 char blocks and 3 dots in between + null term
                                 memset(client_ip_address, 0, (ip_bytes_needed));
                                 wcscpy(client_ip_address, client_ip_char_wchar);
-                                
                                 
                                 int client_port_number = ntohs(client_addr.sin_port);
 
@@ -474,16 +468,19 @@ int main(int argc, char **argv) {
                                 working_client_connection->username = client_username;
                                 working_client_connection->nickname = client_nickname;
                                 working_client_connection->authenticated = TRUE;
-                                g_free(password_mbs);
+
+                                wchar_t auth_good[] = L"You have successfully authenticated. Blabbr Time!";
+                                SSL_write(working_client_connection->ssl, auth_good, wcslen(auth_good) * sizeof(wchar_t));
+
+                            } else {
+
+                                wchar_t auth_error[] = L"There was an error authenticating you. Either the username is taken, or your password was wrong.";
+                                SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
                             }
 
-                            else {
-                                wchar_t user_taken[] = L"username taken";
-                                SSL_write(working_client_connection->ssl, user_taken, wcslen(user_taken) * sizeof(wchar_t));  
-                            }
-
+                            g_free(password_mbs);
                             g_free(username_mbs);
-                            g_free(username_check);
+                            g_free(password_in_store);
                         }
 
                         if(wcsncmp(join_command, data_buffer, wcslen(join_command)) == 0) {
@@ -683,38 +680,6 @@ int main(int argc, char **argv) {
 
 
 // FUNCTION IMPLEMENTATIONS
-
-/* This can be used to build instances of GTree that index on
-   the address of a connection. */
-int sockaddr_in_cmp(const void *addr1, const void *addr2) {
-     const struct sockaddr_in *_addr1 = addr1;
-     const struct sockaddr_in *_addr2 = addr2;
-
-     /* If either of the pointers is NULL or the addresses
-        belong to different families, we abort. */
-     g_assert((_addr1 == NULL) || (_addr2 == NULL) ||
-              (_addr1->sin_family != _addr2->sin_family));
-
-    if (_addr1->sin_addr.s_addr < _addr2->sin_addr.s_addr) {
-        return -1;
-    } else if (_addr1->sin_addr.s_addr > _addr2->sin_addr.s_addr) {
-        return 1;
-    } else if (_addr1->sin_port < _addr2->sin_port) {
-        return -1;
-    } else if (_addr1->sin_port > _addr2->sin_port) {
-        return 1;
-    }
-
-    return 0;
-}
-
-
-/* This can be used to build instances of GTree that index on
-   the file descriptor of a connection. */
-// gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data) {
-//     return GPOINTER_TO_INT(fd1) - GPOINTER_TO_INT(fd2);
-// }
-
 void send_message_to_chatroom(gpointer data, gpointer user_data) {
     SSL_write(((client_connection *) data)->ssl, (wchar_t *) user_data, wcslen((wchar_t *) user_data) * sizeof(wchar_t));
 }

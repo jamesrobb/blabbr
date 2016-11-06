@@ -88,10 +88,11 @@ int main(int argc, char **argv) {
 	
 	wchar_t quit_command[] = L"/quit";
 	wchar_t bye_command[] = L"/bye";
-	wchar_t register_command[] = L"/register";
+	wchar_t user_command[] = L"/user";
+	wchar_t space[] = L" ";
 	size_t quit_command_len = wcslen(quit_command);
 	size_t bye_command_len = wcslen(bye_command);
-	size_t register_command_len = wcslen(register_command);
+	size_t user_command_len = wcslen(user_command);
 	struct input_buffer user_input_buffer;
 	line_buffer_make(&user_input_buffer);
 	
@@ -234,6 +235,7 @@ int main(int argc, char **argv) {
 		if(FD_ISSET(server_bio_fd, &read_fds)) {
 
 			wchar_t *recv_message = g_malloc(WCHAR_STR_MAX * sizeof(wchar_t));
+			memset(recv_message, 0, WCHAR_STR_MAX * sizeof(wchar_t));
 			int recv_len = SSL_read(ssl, recv_message, WCHAR_STR_MAX - 1);
 			//ssize_t recv_len = recv(server_fd, recv_message, WCHAR_STR_MAX - 1, 0);
 
@@ -259,20 +261,20 @@ int main(int argc, char **argv) {
 				exit_main_loop = 1;
 				break;
 			}
-			else if (wcsncmp(register_command, user_line, register_command_len) == 0) {
+			else if (wcsncmp(user_command, user_line, user_command_len) == 0) {
 
 				gui_create_input_area(input_area_win, NULL);
 				wrefresh(input_area_win);
 
 				wchar_t *state;
 				wchar_t *token = wcstok(user_line, L" ", &state);
-				int tokens = 0;
-				gboolean register_command_error = FALSE;
+				int tokens = 1;
+				gboolean user_command_error = FALSE;
 
 				while(token != NULL) {
 
 					if(tokens >= 2) {
-						register_command_error = TRUE;
+						user_command_error = TRUE;
 						break;
 					}
 
@@ -281,17 +283,63 @@ int main(int argc, char **argv) {
 
 					if(tokens == 2) {
 
-						wint_t password[50];
+						wint_t password[61];
+						memset(password, 0, 61);
 						wget_wstr(input_area_win, password);
-						password[49] = '\0';
+						password[60] = '\0';
+						int password_input_length = wint_chars_len(password, 60);
 
+						if(password_input_length < 6 || password_input_length > 50) {
+
+							wchar_t *password_error_message = g_malloc(sizeof(wchar_t) * 58);
+							mbstowcs(password_error_message, "Passwords must be between 6 and 50 characters inclusively", 58);
+							password_error_message[57] = '\0';
+
+							text_area_append(text_area_lines_ref, password_error_message, &text_area_lines_count, &draw_text_area);
+
+						} else {
+
+							unsigned char hash[SHA256_DIGEST_LENGTH];
+							gchar hash_string[65];
+							wchar_t hash_string_wide[65];
+							SHA256_CTX sha256;
+	                        SHA256_Init(&sha256);
+
+	                        for(int i = 0; i < 20000; i++) {
+	                            SHA256_Update(&sha256, password, password_input_length * sizeof(wint_t));
+	                        }
+	                        SHA256_Final(hash, &sha256);
+
+	                        for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+                                sprintf(hash_string + (i * 2), "%02x", hash[i]);
+                            }
+                            hash_string[64] = 0;
+	                        mbstowcs(hash_string_wide, hash_string, 65);
+
+	                        // + 2 for spaces, +65 for hash with null terminator
+	                        int user_command_payload_len = sizeof(wchar_t) * (wcslen(user_command) + wcslen(token) + 2 + 65);
+	                        wchar_t *user_command_payload = g_malloc(user_command_payload_len);
+	                        memset(user_command_payload, 0, user_command_payload_len);
+	                        wcscat(user_command_payload, user_command);
+	                        wcscat(user_command_payload, space);
+	                        wcscat(user_command_payload, token);
+	                        wcscat(user_command_payload, space);
+	                        wcscat(user_command_payload, hash_string_wide);
+
+	                        //text_area_append(text_area_lines_ref, user_command_payload, &text_area_lines_count, &draw_text_area);
+	                        SSL_write(ssl, user_command_payload, user_command_payload_len);
+	                        g_free(user_command_payload);
+                    	}
+
+                    	break;
 					}
 				}
 
-				if(register_command_error) {
+				if(user_command_error) {
 
-					wchar_t *register_error_message = g_malloc(sizeof(wchar_t) * 28);
-					mbstowcs(register_error_message, "Invalid registration command", 28);
+					wchar_t *register_error_message = g_malloc(sizeof(wchar_t) * 29);
+					mbstowcs(register_error_message, "Invalid registration command", 29);
+					register_error_message[28] = '\0';
 
 					text_area_append(text_area_lines_ref, register_error_message, &text_area_lines_count, &draw_text_area);
 
