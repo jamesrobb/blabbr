@@ -40,6 +40,8 @@ void client_connection_init(client_connection *client) {
     client->ssl_connected = FALSE;
     client->bio_ssl = NULL;
     client->ssl = NULL;
+    client->in_game = FALSE;
+    client->current_opponent = NULL;
     client->username = NULL;
     client->nickname = NULL;
     client->current_chatroom = NULL;
@@ -56,6 +58,9 @@ void client_connection_reset(client_connection *client) {
     if(client->ssl != NULL) {
     	SSL_free(client->ssl);
     }
+    client->in_game = FALSE;
+    g_free(client->current_opponent);
+    client->current_opponent = NULL;
 
     g_free(client->ip_address);
     client->ip_address = NULL;
