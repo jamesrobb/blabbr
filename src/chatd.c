@@ -63,8 +63,6 @@ void signal_handler(int signum);
 
 static void initialize_exit_fd(void);
 
-int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata);
-
 // MAIN
 int main(int argc, char **argv) {
 
@@ -93,13 +91,12 @@ int main(int argc, char **argv) {
 
     const SSL_METHOD *ssl_method = SSLv23_server_method();
     SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
-    SSL_CTX_set_default_passwd_cb(ssl_ctx, pem_passwd_cb);
 
     if (SSL_CTX_use_certificate_file(ssl_ctx, SERVER_CERT, SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
-
+    
     if(SSL_CTX_use_RSAPrivateKey_file(ssl_ctx, SERVER_PKEY, SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
@@ -1185,7 +1182,3 @@ void initialize_exit_fd(void) {
 
 }
 
-int pem_passwd_cb(char *buf, G_GNUC_UNUSED int size, G_GNUC_UNUSED int rwflag, G_GNUC_UNUSED void *userdata) {
-    memcpy(buf, "blabbr", 6);
-    return 6;
-}
