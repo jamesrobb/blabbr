@@ -302,7 +302,6 @@ int main(int argc, char **argv) {
                 working_client_connection->last_activity = time(NULL);
                 working_client_connection->timeout_notification = FALSE;
                 
-                //working_client_connection = (client_connection*) g_tree_lookup(clients, &client_fd);
                 gboolean shutdown_ssl = FALSE;
                 gboolean connection_closed = FALSE;
 
@@ -311,14 +310,6 @@ int main(int argc, char **argv) {
 
                 int ret = SSL_read(working_client_connection->ssl, data_buffer, TCP_BUFFER_LENGTH * sizeof(wchar_t));
 
-                // if(working_client_connection->authenticated != TRUE) {
-                //     wchar_t please_authenticate[] = L"Before proceeding please authenticate\n\n"
-                //                                      "You can use '/regi <username> <password>' to create an account\n"
-                //                                      "To log into your account use '/user <username>' to be prompted for password";
-                //     SSL_write(working_client_connection->ssl, please_authenticate, wcslen(please_authenticate) * sizeof(wchar_t));
-                //     continue;
-                // }
-
                 // we do ret <= 0 because this indicates error / shutdown (hopefully a clean one)
                 // ideally we will detect the error and deal with it but you know
                 if(ret <= 0) {
@@ -326,40 +317,10 @@ int main(int argc, char **argv) {
                 }
 
                 if(SSL_RECEIVED_SHUTDOWN == SSL_get_shutdown(working_client_connection->ssl) || connection_closed) {
-                    SSL_shutdown(working_client_connection->ssl);
                     shutdown_ssl = TRUE;
                 }
 
-                if(shutdown_ssl || connection_closed) {
-                    g_info("closing connection on socket fd %d, ip %s, port %d", 
-                            working_client_connection->fd, 
-                            inet_ntoa(client_addr.sin_addr), 
-                            ntohs(client_addr.sin_port));
-
-                    // log that user disconnected
-                    server_log_access(inet_ntoa(client_addr.sin_addr),
-                                          ntohs(client_addr.sin_port),
-                                          "disconnected");
-
-                    // remove the user from his chatroom if he was in one.
-                    if(working_client_connection->current_chatroom != NULL) {
-                        GList **previous_chatroom = (GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
-                        *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
-                    }
-
-                    // remove from the username/connlist
-                    g_tree_remove(username_clientconns, working_client_connection->username);
-                    shutdown(working_client_connection->fd, SHUT_RDWR);
-                    close(working_client_connection->fd);
-
-                    g_tree_remove(clients, &working_client_connection->fd);
-                    current_connected_count--;
-                    
-                    // we continue because nothing else to be done with this client connection now
-                    continue;
-                }
-
-                if(ret > 0) {
+                if(ret > 0 && !(shutdown_ssl || connection_closed)) {
                     gboolean command_entered = FALSE;
                     // checking wether input was command
                     if(wcsncmp(L"/", data_buffer, 1) == 0) {
@@ -381,6 +342,23 @@ int main(int argc, char **argv) {
                         // user wants to authenticate or register
                         if(wcsncmp(user_command, data_buffer, wcslen(user_command)) == 0) {
                             command_entered = TRUE;
+
+                            if(time(NULL) - working_client_connection->last_auth_attempt < AUTH_DELAY) {
+
+                                wchar_t auth_delay_message[80];
+                                memset(auth_delay_message, 0, 80 * sizeof(wchar_t));
+                                swprintf(auth_delay_message, 
+                                         80,
+                                         L"SERVER You must wait %ds before authentication attempts. %d attempts left",
+                                         AUTH_DELAY, MAX_AUTH_ATTEMPTS - working_client_connection->auth_attempts);
+
+                                SSL_write(working_client_connection->ssl, auth_delay_message, (wcslen(auth_delay_message) + 1) * sizeof(wchar_t));
+
+                                working_client_connection->last_auth_attempt = time(NULL);
+                                continue;
+                            }
+
+                            working_client_connection->last_auth_attempt = time(NULL);
 
                             // setup GkeyFile
                             // future: add error handling for file handling
@@ -452,6 +430,12 @@ int main(int argc, char **argv) {
 
                                 } else {
                                     sprintf(access_message, "%s %s", username_mbs, "authentication error");
+                                    working_client_connection->auth_attempts++;
+
+                                    if(working_client_connection->auth_attempts == MAX_AUTH_ATTEMPTS) {
+                                        shutdown_ssl = TRUE;
+                                        connection_closed = TRUE;
+                                    }
                                 }
 
                             }
@@ -489,8 +473,14 @@ int main(int argc, char **argv) {
 
                             } else {
 
-                                wchar_t auth_error[] = L"SERVER There was an error authenticating you. Either the username is taken, or your password was wrong.";
-                                SSL_write(working_client_connection->ssl, auth_error, wcslen(auth_error) * sizeof(wchar_t));
+                                wchar_t auth_error[125];
+                                memset(auth_error, 0, 125);
+                                swprintf(auth_error, 
+                                        125, 
+                                        L"SERVER There was an error authenticating you. Either the username is taken, or your password was wrong. %d attempts left.", 
+                                        MAX_AUTH_ATTEMPTS - working_client_connection->auth_attempts);
+
+                                SSL_write(working_client_connection->ssl, auth_error, (wcslen(auth_error)+1) * sizeof(wchar_t));
                             }
 
                             g_free(password_mbs);
@@ -953,23 +943,18 @@ int main(int argc, char **argv) {
                     }
 
                 }
-            } 
-            else {
 
-                if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT - 5 && working_client_connection->timeout_notification != TRUE) {
-                    wchar_t connection_time_out[] = L"SERVER Your connection is about to be timed out";
-                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
-                    working_client_connection->timeout_notification = TRUE;
-                }
+                if(shutdown_ssl || connection_closed) {
 
-                // handling timeouts
-                if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
-                    // wchar_t connection_timed_out[] = L"your connection timed out";
-                    // SSL_write(working_client_connection->ssl, connection_timed_out, wcslen(connection_timed_out) * sizeof(wchar_t));
-                    // log that user timed out
+                    g_info("closing connection on socket fd %d, ip %s, port %d", 
+                            working_client_connection->fd, 
+                            inet_ntoa(client_addr.sin_addr), 
+                            ntohs(client_addr.sin_port));
+
+                    // log that user disconnected
                     server_log_access(inet_ntoa(client_addr.sin_addr),
                                           ntohs(client_addr.sin_port),
-                                          "timed out");
+                                          "disconnected");
 
                     // remove the user from his chatroom if he was in one.
                     if(working_client_connection->current_chatroom != NULL) {
@@ -979,7 +964,42 @@ int main(int argc, char **argv) {
 
                     // remove from the username/connlist
                     g_tree_remove(username_clientconns, working_client_connection->username);
-                    wchar_t connection_time_out[] = L"SERVER Your connection has now timed out.";
+
+                    SSL_shutdown(working_client_connection->ssl);
+                    shutdown(working_client_connection->fd, SHUT_RDWR);
+                    close(working_client_connection->fd);
+
+                    g_tree_remove(clients, &working_client_connection->fd);
+                    current_connected_count--;
+                    
+                    // we continue because nothing else to be done with this client connection now
+                    continue;
+                }
+
+            } else {
+
+                if(time(NULL) - working_client_connection->last_activity >= CONNECTIOM_TIMEOUT_WARNING && working_client_connection->timeout_notification != TRUE) {
+                    wchar_t connection_time_out[] = L"SERVER Your connection is about to be timed out";
+                    SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
+                    working_client_connection->timeout_notification = TRUE;
+                }
+
+                // handling timeouts
+                if(time(NULL) - working_client_connection->last_activity >= CONNECTION_TIMEOUT) {
+ 
+                    server_log_access(inet_ntoa(client_addr.sin_addr),
+                                          ntohs(client_addr.sin_port),
+                                          "timed out.");
+
+                    // remove the user from his chatroom if he was in one.
+                    if(working_client_connection->current_chatroom != NULL) {
+                        GList **previous_chatroom = (GList**) g_tree_lookup(chatrooms, working_client_connection->current_chatroom);
+                        *previous_chatroom = g_list_remove(*previous_chatroom, working_client_connection);
+                    }
+
+                    // remove from the username/connlist
+                    g_tree_remove(username_clientconns, working_client_connection->username);
+                    wchar_t connection_time_out[] = L"SERVER Your connection has now timed out";
                     SSL_write(working_client_connection->ssl, connection_time_out, (wcslen(connection_time_out) + 1) * sizeof(wchar_t));
                     shutdown(working_client_connection->fd, SHUT_RDWR);
                     close(working_client_connection->fd);

@@ -10,6 +10,9 @@
 #define TCP_BUFFER_LENGTH						15000 // assumes 15000 wchar_t characters
 #define SERVER_MAX_CONN_BACKLOG					50
 #define CONN_FREE								-1
-#define CONNECTION_TIMEOUT						60
+#define CONNECTION_TIMEOUT						300 // 5 minutes
+#define CONNECTIOM_TIMEOUT_WARNING				270 // 4.5 minutes
+#define AUTH_DELAY								5  // 5 seconds
+#define MAX_AUTH_ATTEMPTS						3
 
 #endif

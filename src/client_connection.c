@@ -40,6 +40,7 @@ void client_connection_init(client_connection *client) {
     client->in_game = FALSE;
     client->game_score = 0;
     client->auth_attempts = 0;
+    client->last_auth_attempt = 0;
     client->current_opponent = NULL;
     client->username = NULL;
     //client->nickname = NULL;
@@ -59,6 +60,8 @@ void client_connection_reset(client_connection *client) {
     }
     client->in_game = FALSE;
     client->game_score = 0;
+    client->auth_attempts = 0;
+    client->last_auth_attempt = 0;
     
     g_free(client->current_opponent);
     client->current_opponent = NULL;

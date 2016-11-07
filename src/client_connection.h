@@ -24,6 +24,7 @@ typedef struct _client_connection {
     gboolean in_game;
     int game_score;
     short auth_attempts;
+    time_t last_auth_attempt;
     wchar_t *current_opponent;
     wchar_t *ip_address;
     wchar_t *username;
