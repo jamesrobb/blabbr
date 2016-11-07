@@ -7,30 +7,30 @@
 #include "util.h"
 
 void client_send_welcome(client_connection *client) {
-	wchar_t *welcome = L"SERVER Welcome to Blabbr! Type /help for helpful information. Please authenticate.";
-	int welcome_len = 83 * sizeof(wchar_t);
-	int client_addr_len;
-	struct sockaddr_in client_addr;
+    wchar_t *welcome = L"SERVER Welcome to Blabbr! Type /help for helpful information. Please use '/user <username>' authenticate.";
+    int welcome_len = (wcslen(welcome) + 1) * sizeof(wchar_t);
+    int client_addr_len;
+    struct sockaddr_in client_addr;
 
-	int bio_sent = SSL_write(client->ssl, welcome, welcome_len);
+    int bio_sent = SSL_write(client->ssl, welcome, welcome_len);
 
-	g_info("bio sent is %d", bio_sent);
+    g_info("bio sent is %d", bio_sent);
 
-	if(bio_sent != (int) welcome_len) {
-	// if(send(client->fd, welcome, welcome_len, 0) != (int) welcome_len) {
+    if(bio_sent != (int) welcome_len) {
+    // if(send(client->fd, welcome, welcome_len, 0) != (int) welcome_len) {
 
-		memset(&client_addr, 0, sizeof(client_addr));
-		getpeername(client->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
+        memset(&client_addr, 0, sizeof(client_addr));
+        getpeername(client->fd, (struct sockaddr*)&client_addr , (socklen_t*)&client_addr_len);
 
-		g_critical("failed to send() welcome message on socket fd %d, ip %s, port %d", 
-					client->fd, 
-					inet_ntoa(client_addr.sin_addr), 
-					ntohs(client_addr.sin_port));
-	}
+        g_critical("failed to send() welcome message on socket fd %d, ip %s, port %d", 
+                    client->fd, 
+                    inet_ntoa(client_addr.sin_addr), 
+                    ntohs(client_addr.sin_port));
+    }
 }
 
 void client_connection_init(client_connection *client) {
-	client->last_activity = time(NULL);
+    client->last_activity = time(NULL);
     client->timeout_notification = FALSE;
     client->fd = CONN_FREE;
     client->ip_address = NULL;
@@ -57,7 +57,7 @@ void client_connection_reset(client_connection *client) {
     client->authenticated = FALSE;
     client->ssl_connected = FALSE;
     if(client->ssl != NULL) {
-    	SSL_free(client->ssl);
+        SSL_free(client->ssl);
     }
     client->in_game = FALSE;
     client->game_score = 0;
