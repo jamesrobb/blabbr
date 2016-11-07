@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     // we set a custom logging callback
     g_log_set_handler (NULL, 
                        G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
-                       httpd_log_all_handler_cb, 
+                       server_log_all_handler_cb, 
                        NULL);
 
     if (argc != 2) {
@@ -560,8 +560,12 @@ int main(int argc, char **argv) {
                             chatroom_list = g_malloc(bytes_needed); 
                             memset(chatroom_list, 0, bytes_needed);
                             wcscat(chatroom_list, L"SERVER Available public chatrooms:\n");
+                            
                             g_tree_foreach(chatrooms, print_chatroom_array, chatroom_list);
-                            SSL_write(working_client_connection->ssl, chatroom_list, wcslen(chatroom_list) * sizeof(wchar_t));
+                            int chatroom_list_len = wcslen(chatroom_list);
+                            chatroom_list[chatroom_list_len-1] = 0; // get rid of the trailing newline
+
+                            SSL_write(working_client_connection->ssl, chatroom_list, (chatroom_list_len-1) * sizeof(wchar_t));
                             g_free(chatroom_list);
                         }
 
@@ -574,6 +578,7 @@ int main(int argc, char **argv) {
                             available_user_list = g_malloc(bytes_needed);
                             memset(available_user_list, 0, bytes_needed);
                             wcscat(available_user_list, L"SERVER Users online:\n");
+                            
                             g_tree_foreach(clients, print_available_users, available_user_list);
                             int available_user_list_len = wcslen(available_user_list);
                             available_user_list[available_user_list_len-1] = 0; // get rid of the trailing newline
