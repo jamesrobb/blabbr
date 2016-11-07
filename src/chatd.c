@@ -1057,7 +1057,8 @@ void send_help_message(client_connection *working_client_connection) {
                                   "Use '/join <chatroom>' to join/create public chatroom\n"
                                   "Use '/who' to see list of online usernames\n"
                                   "Use '/say <username> <message>' to send private message\n"
-                                  "Use '/game <username>' to start a game with a user";
+                                  "Use '/game <username>' to start a game with a user\n"
+                                  "Use '/bye' to exit Blabbr";
     int bytes_needed = (wcslen(command_help_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
     
     SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
