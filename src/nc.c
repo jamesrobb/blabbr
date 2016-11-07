@@ -85,7 +85,6 @@ int main(int argc, char **argv) {
 	WINDOW *input_area_header_win;
 	WINDOW *input_area_win;
 
-	int exit_main_loop = 0;
 	int exit_status = EXIT_SUCCESS;
 
 	short origf, origb;
@@ -93,11 +92,9 @@ int main(int argc, char **argv) {
 	int draw_text_area = 0;
 	int text_area_lines_count = 0;
 	
-	wchar_t quit_command[] = L"/quit";
 	wchar_t bye_command[] = L"/bye";
 	wchar_t user_command[] = L"/user";
 	wchar_t space[] = L" ";
-	size_t quit_command_len = wcslen(quit_command);
 	size_t bye_command_len = wcslen(bye_command);
 	size_t user_command_len = wcslen(user_command);
 	struct input_buffer user_input_buffer;
@@ -124,9 +121,9 @@ int main(int argc, char **argv) {
 
     int connect_res = connect(server_fd, (struct sockaddr *) &server, sizeof(server));
     if (connect_res == -1) {
+    	printf("Unable to connect to server.\n");
         g_critical("connecting to server failed");
-        exit_main_loop = 1;
-        exit_status = EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
     g_info("server port for server connection: %d", server_port);
 
@@ -146,6 +143,7 @@ int main(int argc, char **argv) {
     ssl_error = SSL_connect(ssl);
 
     if(ssl_error != 1) {
+    	printf("Unable to established secure connection to server.\n");
     	ssl_print_error(ssl_error);
     	exit(EXIT_FAILURE);
     }
@@ -200,7 +198,7 @@ int main(int argc, char **argv) {
 
 	initialize_exit_fd();
 
-	while(1 && !exit_main_loop) {
+	while(TRUE) {
 
 		// select functionality
 		int server_bio_fd = BIO_get_fd(server_bio, NULL);
@@ -230,13 +228,13 @@ int main(int argc, char **argv) {
             if (signum == SIGINT) {
                 
                 g_warning("we are exiting");
-                exit_main_loop = 1;
                 exit_status = EXIT_SUCCESS;
                 break;
 
             } else if (signum == SIGTERM) {
-                /* Clean-up and exit. */
+
                 g_warning("sigterm exiting now");
+                exit_status = EXIT_SUCCESS;
                 break;
             }
                     
@@ -255,7 +253,6 @@ int main(int argc, char **argv) {
 			wchar_t *recv_message = g_malloc(WCHAR_STR_MAX * sizeof(wchar_t));
 			memset(recv_message, 0, WCHAR_STR_MAX * sizeof(wchar_t));
 			int recv_len = SSL_read(ssl, recv_message, WCHAR_STR_MAX - 1);
-			//ssize_t recv_len = recv(server_fd, recv_message, WCHAR_STR_MAX - 1, 0);
 
 			if(recv_len <= 0) {
                 connection_closed = TRUE;
@@ -268,10 +265,11 @@ int main(int argc, char **argv) {
 
             if(shutdown_ssl || connection_closed) {
 
+            	g_free(recv_message);
+
                 shutdown(server_fd, SHUT_RDWR);
                 close(server_fd);
 
-                exit_main_loop = 1;
                 exit_status = EXIT_SUCCESS;
                 break;
 
@@ -288,17 +286,16 @@ int main(int argc, char **argv) {
 		int user_line_len = line_buffer_get_line_non_blocking(&user_input_buffer, user_line, WCHAR_STR_MAX);
 
 		if(user_line_len > 0) {
-			// we finally got some input
-			if(wcsncmp(quit_command, user_line, quit_command_len) == 0) {
-				exit_main_loop = 1;
+
+			if(wcsncmp(bye_command, user_line, bye_command_len) == 0) {
+
 				SSL_shutdown(ssl);
+				shutdown(server_fd, SHUT_RDWR);
+                close(server_fd);
+
 				break;
-			} 
-			else if(wcsncmp(bye_command, user_line, bye_command_len) == 0) {
-				exit_main_loop = 1;
-				break;
-			}
-			else if (wcsncmp(user_command, user_line, user_command_len) == 0) {
+
+			} else if (wcsncmp(user_command, user_line, user_command_len) == 0) {
 
 				gui_create_input_area(input_area_win, NULL);
 				wrefresh(input_area_win);
@@ -393,10 +390,8 @@ int main(int argc, char **argv) {
 				wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
 				memcpy(str, user_line, user_line_len * sizeof(wchar_t));
 				SSL_write(ssl, str, user_line_len * sizeof(wchar_t));
-				// text_area_lines = g_slist_append(text_area_lines, str);
-				// text_area_lines_count++;
-				// draw_text_area = 1;
 				g_free(str);
+
 			}
 
 		}
