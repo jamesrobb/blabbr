@@ -23,10 +23,11 @@ typedef struct _client_connection {
     SSL *ssl;
     gboolean in_game;
     int game_score;
+    short auth_attempts;
     wchar_t *current_opponent;
     wchar_t *ip_address;
     wchar_t *username;
-    wchar_t *nickname;
+    //wchar_t *nickname; // future: allow users to use nicknames
     wchar_t *current_chatroom;
 } client_connection;
 

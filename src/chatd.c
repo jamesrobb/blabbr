@@ -43,7 +43,6 @@ static int exit_fd[2];
 #define  SERVER_PKEY            "./blabbr.key"
 
 // FUNCTION DECLERATIONS
-
 gint g_tree_wchar_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
 
 gint g_tree_int_cmp(gconstpointer a,  gconstpointer b, G_GNUC_UNUSED gpointer user_data);
@@ -373,7 +372,7 @@ int main(int argc, char **argv) {
                         wchar_t who_command[] = L"/who";
                         wchar_t say_command[] = L"/say ";
                         wchar_t help_command[] = L"/help";
-                        wchar_t nick_command[] = L"/nick ";
+                        //wchar_t nick_command[] = L"/nick ";
                         wchar_t game_command[] = L"/game ";
                         wchar_t accept_command[] = L"/accept";
                         wchar_t decline_command[] = L"/decline";
@@ -477,11 +476,11 @@ int main(int argc, char **argv) {
 
                                 wchar_t *client_username = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
                                 wcscpy(client_username, username);
-                                wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
-                                wcscpy(client_nickname, username);
+                                // wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(username) + 1));
+                                // wcscpy(client_nickname, username);
 
                                 working_client_connection->username = client_username;
-                                working_client_connection->nickname = client_nickname;
+                                //working_client_connection->nickname = client_nickname;
                                 working_client_connection->authenticated = TRUE;
 
                                 g_tree_insert(username_clientconns, working_client_connection->username, working_client_connection);
@@ -640,28 +639,30 @@ int main(int argc, char **argv) {
                             }
                         }
 
-                        if(wcsncmp(nick_command, data_buffer, wcslen(nick_command)) == 0) {
-                            command_entered = TRUE;
+                        // future: allow users to set a nickname
+                        // if(wcsncmp(nick_command, data_buffer, wcslen(nick_command)) == 0) {
+                        //     command_entered = TRUE;
 
-                            token = wcstok(data_buffer, L" ", &buffer); // this is the /nick part
-                            token = wcstok(NULL, L" ", &buffer); // this is the nickname the user wants
-                            if(token != NULL) {
-                                wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(token) + 1));
-                                memset(client_nickname, 0, sizeof(wchar_t) * (wcslen(token) + 1));
-                                wcscpy(client_nickname, token);
-                                g_free(working_client_connection->nickname);
+                        //     token = wcstok(data_buffer, L" ", &buffer); // this is the /nick part
+                        //     token = wcstok(NULL, L" ", &buffer); // this is the nickname the user wants
+                        //     if(token != NULL) {
+                        //         wchar_t *client_nickname = g_malloc(sizeof(wchar_t) * (wcslen(token) + 1));
+                        //         memset(client_nickname, 0, sizeof(wchar_t) * (wcslen(token) + 1));
+                        //         wcscpy(client_nickname, token);
+                        //         g_free(working_client_connection->nickname);
                                 
-                                working_client_connection->nickname = client_nickname;
-                                wchar_t *nickname_change_text = L"Your nickname has been changed";
-                                int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t);
-                                SSL_write(working_client_connection->ssl, nickname_change_text, bytes_needed);
-                            }
-                            else {
-                                wchar_t *nickname_error_text = L"usage '/nick <nickname>'";
-                                int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t);
-                                SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
-                            }
-                        }
+                        //         working_client_connection->nickname = client_nickname;
+                        //         wchar_t *nickname_change_text = L"Your nickname has been changed";
+                        //         int bytes_needed = wcslen(nickname_change_text) * sizeof(wchar_t);
+                        //         SSL_write(working_client_connection->ssl, nickname_change_text, bytes_needed);
+                        //     }
+                        //     else {
+                        //         wchar_t *nickname_error_text = L"usage '/nick <nickname>'";
+                        //         int bytes_needed = wcslen(nickname_error_text) * sizeof(wchar_t);
+                        //         SSL_write(working_client_connection->ssl, nickname_error_text, bytes_needed);
+                        //     }
+                        // }
+
                         if(wcsncmp(game_command, data_buffer, wcslen(game_command)) == 0) {
                             command_entered = TRUE;
                             
