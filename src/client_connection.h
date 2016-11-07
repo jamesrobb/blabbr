@@ -22,6 +22,7 @@ typedef struct _client_connection {
     BIO *bio_ssl;
     SSL *ssl;
     gboolean in_game;
+    int game_score;
     wchar_t *current_opponent;
     wchar_t *ip_address;
     wchar_t *username;
