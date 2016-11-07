@@ -517,7 +517,12 @@ int main(int argc, char **argv) {
 
                             token = wcstok(data_buffer, L" ", &buffer); // now it's just the /join part
                             token = wcstok(NULL, L" ", &buffer); // now it should be the chatroom name part
-
+                            if(token == NULL) {
+                                wchar_t *join_error_text = L"SERVER Usage '/join <chatroom>'";
+                                int error_bytes_needed = wcslen(join_error_text) * sizeof(wchar_t);
+                                SSL_write(working_client_connection->ssl, join_error_text, error_bytes_needed);
+                                continue;
+                            }
                             wchar_t *chatroom_name = g_malloc((wcslen(token)+1) * sizeof(wchar_t));
                             memset(chatroom_name, 0, (wcslen(token)+1) * sizeof(wchar_t));
                             chatroom_name = wcscpy(chatroom_name, token);
@@ -563,9 +568,10 @@ int main(int argc, char **argv) {
                             command_entered = TRUE;
 
                             wchar_t *chatroom_list;
-                            int bytes_needed = ((sizeof(wchar_t) * 200) * g_tree_nnodes(chatrooms))+4;
+                            int bytes_needed = ((sizeof(wchar_t) * 200) * g_tree_nnodes(chatrooms)) + (36 * sizeof(wchar_t)); // + 1 for nullterminator and + 35 |SERVER Available public chatrooms:\n|
                             chatroom_list = g_malloc(bytes_needed); 
                             memset(chatroom_list, 0, bytes_needed);
+                            wcscat(chatroom_list, L"SERVER Available public chatrooms:\n");
                             g_tree_foreach(chatrooms, print_chatroom_array, chatroom_list);
                             SSL_write(working_client_connection->ssl, chatroom_list, wcslen(chatroom_list) * sizeof(wchar_t));
                             g_free(chatroom_list);
@@ -576,13 +582,10 @@ int main(int argc, char **argv) {
                             command_entered = TRUE;
 
                             wchar_t *available_user_list;
-                            int bytes_needed = ((sizeof(wchar_t) * 200) * current_connected_count) + sizeof(wchar_t); // + for null terminator
+                            int bytes_needed = ((sizeof(wchar_t) * 200) * current_connected_count) + (22 * sizeof(wchar_t)); // + 1 for null terminator + 21 for |SERVER Users online:\n|
                             available_user_list = g_malloc(bytes_needed);
                             memset(available_user_list, 0, bytes_needed);
                             wcscat(available_user_list, L"SERVER Users online:\n");
-
-                            g_info("current conn %d and current g num_nodes %d", current_connected_count, g_tree_nnodes(clients));
-                            
                             g_tree_foreach(clients, print_available_users, available_user_list);
                             int available_user_list_len = wcslen(available_user_list);
                             available_user_list[available_user_list_len-1] = 0; // get rid of the trailing newline
@@ -598,26 +601,39 @@ int main(int argc, char **argv) {
                             token = wcstok(data_buffer, L" ", &buffer); // this is the /msg part
                             token = wcstok(NULL, L" ", &buffer); // this is the username we want to send to
                             if(token == NULL) {
-                                wchar_t *command_say_text = L"Usage '/say <username> <message>'";
-                                int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                wchar_t *command_say_text = L"SERVER Usage '/say <username> <message>'";
+                                int bytes_needed = (wcslen(command_say_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
                             
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                             }
 
                             client_connection *to_send_to = g_tree_lookup(username_clientconns, token);
                             if(to_send_to != NULL) {
+                                if(buffer == NULL){
+                                    wchar_t *say_msg_error_text = L"SERVER a private message must contain atleast one character'";
+                                    int say_msg_error_bytes_needed = (wcslen(say_msg_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                    SSL_write(working_client_connection->ssl, say_msg_error_text, say_msg_error_bytes_needed);
+                                    continue;
+                                }
+                                if(wcslen(buffer) < 1) {
+                                    wchar_t *say_msg_error_text = L"SERVER a private message must contain atleast one character'";
+                                    int say_msg_error_bytes_needed = (wcslen(say_msg_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                    SSL_write(working_client_connection->ssl, say_msg_error_text, say_msg_error_bytes_needed);
+                                    continue;
+                                }
                                 // length of msg + lenght of username + ' ' + null terminator
-                                int bytes_needed = (wcslen(buffer) + wcslen(working_client_connection->username) + 2)* sizeof(wchar_t);
+                                int bytes_needed = (wcslen(buffer) + wcslen(working_client_connection->username) + 11)* sizeof(wchar_t);
                                 wchar_t *message_to_send = g_malloc(bytes_needed);
                                 memset(message_to_send, 0, bytes_needed);
                                 wcscat(message_to_send, working_client_connection->username);
-                                wcscat(message_to_send, L" ");
+                                wcscat(message_to_send, L"<private> ");
                                 wcscat(message_to_send, buffer);
                                 SSL_write(to_send_to->ssl, message_to_send, bytes_needed);
+                                SSL_write(working_client_connection->ssl, message_to_send, bytes_needed);
                                 g_free(message_to_send);
                             }
                             else {
-                                wchar_t *command_say_text = L"Username not found use '/who' to see a list of usernames";
+                                wchar_t *command_say_text = L"SERVER Username not found use '/who' to see a list of usernames";
                                 int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
                             
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
@@ -665,7 +681,7 @@ int main(int argc, char **argv) {
                             }
                             // check wether working client is already in a game
                             if(working_client_connection->in_game == TRUE){
-                                wchar_t *command_say_text = L"SERVER You are already in a game type '/giveup' to give up";
+                                wchar_t *command_say_text = L"SERVER You are already in a game type '/decline' to forfeit";
                                 int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t);
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                                 continue;
@@ -695,6 +711,10 @@ int main(int argc, char **argv) {
                                 wcscat(message_to_send, L" has challenged you to a dice game type '/accept' to take him/her on or '/decline' to decline his/hers game");
                                 SSL_write(to_send_to->ssl, message_to_send, bytes_needed);
                                 g_free(message_to_send);
+
+                                wchar_t *game_inv_sent_text = L"SERVER Your game invitiation has been sent";
+                                int game_inv_sent_bytes_needed = wcslen(game_inv_sent_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                SSL_write(working_client_connection->ssl, game_inv_sent_text, game_inv_sent_bytes_needed);
                             }
                             else {
                                 wchar_t *command_say_text = L"SERVER Username not found use '/who' to see a list of usernames";
@@ -1012,8 +1032,9 @@ void send_help_message(client_connection *working_client_connection) {
                                   "Use '/list' to see list of public chatrooms\n"
                                   "Use '/join <chatroom>' to join/create public chatroom\n"
                                   "Use '/who' to see list of online usernames\n"
-                                  "Use '/say <username> <message>' to send private message";
-    int bytes_needed = wcslen(command_help_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
+                                  "Use '/say <username> <message>' to send private message\n"
+                                  "Use '/game <username>' to start a game with a user";
+    int bytes_needed = (wcslen(command_help_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
     
     SSL_write(working_client_connection->ssl, command_help_text, bytes_needed);
 }
