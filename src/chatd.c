@@ -591,13 +591,15 @@ int main(int argc, char **argv) {
                         if(wcsncmp(say_command, data_buffer, wcslen(say_command)) == 0) {
                             command_entered = TRUE;
 
-                            token = wcstok(data_buffer, L" ", &buffer); // this is the /msg part
+                            token = wcstok(data_buffer, L" ", &buffer); // this is the /say part
                             token = wcstok(NULL, L" ", &buffer); // this is the username we want to send to
+                            
                             if(token == NULL) {
                                 wchar_t *command_say_text = L"SERVER Usage '/say <username> <message>'";
                                 int bytes_needed = (wcslen(command_say_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
                             
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
+                                continue;
                             }
 
                             client_connection *to_send_to = g_tree_lookup(username_clientconns, token);
