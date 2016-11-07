@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=gnu11 -O2 -g -Wall -Wextra -Wformat=2 $(shell pkg-config glib-2.0 openssl --cflags) -D_GNU_SOURCE -I/usr/include/ncursesw
+CFLAGS = -std=gnu11 -O2 -g -Wall -Wextra -Wformat=2 $(shell pkg-config glib-2.0 openssl --cflags) $(shell ncursesw5-config --cflags)
 OBJFLAGS = -c
 
 all: chatd chat
