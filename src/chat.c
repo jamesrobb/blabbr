@@ -75,8 +75,10 @@ int main(int argc, char **argv) {
 	//we set a custom logging callback
     g_log_set_handler (NULL, 
                        G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
-                       client_log_all_handler_cb, 
-                       text_area_lines_ref);
+                       client_log_all_handler_cb,
+                       NULL);
+    // used to print debug info into the chat area
+    //                 text_area_lines_ref);
 
     // gui variables
 	WINDOW *header_win;
