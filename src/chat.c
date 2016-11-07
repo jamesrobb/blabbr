@@ -1,336 +1,222 @@
-/* A UDP echo server with timeouts.
- *
- * Note that you will not need to use select and the timeout for a
- * tftp server. However, select is also useful if you want to receive
- * from multiple sockets at the same time. Read the documentation for
- * select on how to do this (Hint: Iterate with FD_ISSET()).
- */
-
-#include <assert.h>
+#include <ncursesw/curses.h>
+#include <curses.h>
+#include <locale.h>
+#include <glib.h>
+#include <wchar.h>
+#include <wctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <sys/types.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <ctype.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <signal.h>
 
-/* Secure socket layer headers */
+// open ssl headers
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/bio.h>
 
-/* For nicer interaction, we use the GNU readline library. */
-#include <readline/readline.h>
-#include <readline/history.h>
+#include "chat_ui.h"
+#include "constants.h"
+#include "line_buffer.h"
+#include "log.h"
+#include "util.h"
 
+#ifdef UNUSED
+#elif defined(__GNUC__)
+# define UNUSED(x) UNUSED_ ## x __attribute__((unused))
+#elif defined(__LCLINT__)
+# define UNUSED(x) /*@unused@*/ x
+#else
+# define UNUSED(x) x
+#endif
 
-/* This variable holds a file descriptor of a pipe on which we send a
- * number if a signal is received. */
-static int exitfd[2];
+#define NC_UNUSED(x) (void)(x)
 
+// GLOBAL VARIABLES
+static int exit_fd[2];
 
-/* If someone kills the client, it should still clean up the readline
-   library, otherwise the terminal is in a inconsistent state. The
-   signal number is sent through a self pipe to notify the main loop
-   of the received signal. This avoids a race condition in select. */
-void
-signal_handler(int signum)
-{
-        int _errno = errno;
-        if (write(exitfd[1], &signum, sizeof(signum)) == -1 && errno != EAGAIN) {
-                        abort();
-        }
-        fsync(exitfd[1]);
-        errno = _errno;
-}
+// FUNCTION DECLERATIONS
+void signal_handler(int signum);
 
+static void initialize_exit_fd(void);
 
-static void initialize_exitfd(void)
-{
-        /* Establish the self pipe for signal handling. */
-        if (pipe(exitfd) == -1) {
-                perror("pipe()");
-                exit(EXIT_FAILURE);
-        }
+void text_area_append(GSList **text_area_lines_ref, wchar_t *message, int *text_area_lines_count, int *draw_text_area);
 
-        /* Make read and write ends of pipe nonblocking */
-        int flags;        
-        flags = fcntl(exitfd[0], F_GETFL);
-        if (flags == -1) {
-                perror("fcntl-F_GETFL");
-                exit(EXIT_FAILURE);
-        }        
-        flags |= O_NONBLOCK;                /* Make read end nonblocking */
-        if (fcntl(exitfd[0], F_SETFL, flags) == -1) {
-                perror("fcntl-F_SETFL");
-                exit(EXIT_FAILURE);
-        }
- 
-        flags = fcntl(exitfd[1], F_GETFL);
-        if (flags == -1) {
-                perror("fcntl-F_SETFL");
-                exit(EXIT_FAILURE);
-        }
-        flags |= O_NONBLOCK;                /* Make write end nonblocking */
-        if (fcntl(exitfd[1], F_SETFL, flags) == -1) {
-                perror("fcntl-F_SETFL");
-                exit(EXIT_FAILURE);
-        }
+// MAIN
+int main(int argc, char **argv) {
 
-        /* Set the signal handler. */
-        struct sigaction sa;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_flags = SA_RESTART;           /* Restart interrupted reads()s */
-        sa.sa_handler = signal_handler;
-        if (sigaction(SIGINT, &sa, NULL) == -1) {
-                perror("sigaction");
-                exit(EXIT_FAILURE);
-        }
-        if (sigaction(SIGTERM, &sa, NULL) == -1) {
-                perror("sigaction");
-                exit(EXIT_FAILURE);
-        }       
-}
+	// for unicode purposes
+	setlocale(LC_ALL, "");
 
+	if (argc > 3 || argc < 2) {
+        g_critical("Usage: %s <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
 
-/* The next two variables are used to access the encrypted stream to
- * the server. The socket file descriptor server_fd is provided for
- * select (if needed), while the encrypted communication should use
- * server_ssl and the SSL API of OpenSSL.
- */
-static int server_fd;
-static SSL *server_ssl;
+    char server_ip[16] = {0};
+    int server_port = strtol(argv[1], NULL, 10);
 
-/* This variable shall point to the name of the user. The initial value
-   is NULL. Set this variable to the username once the user managed to be
-   authenticated. */
-static char *user;
+    if(argc == 3) {
+    	strncpy(server_ip, argv[2], 15);
+    } else {
+    	strncpy(server_ip, "127.0.0.1", 9);
+    }
 
-/* This variable shall point to the name of the chatroom. The initial
-   value is NULL (not member of a chat room). Set this variable whenever
-   the user changed the chat room successfully. */
-static char *chatroom;
+	// we define this variable earlier than others for logging purposes
+	GSList *text_area_lines = NULL;
+	GSList **text_area_lines_ref = &text_area_lines;
 
-/* This prompt is used by the readline library to ask the user for
- * input. It is good style to indicate the name of the user and the
- * chat room he is in as part of the prompt. */
-static char *prompt;
+	//we set a custom logging callback
+    g_log_set_handler (NULL, 
+                       G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL | G_LOG_FLAG_RECURSION, 
+                       client_log_all_handler_cb, 
+                       text_area_lines_ref);
 
+    // gui variables
+	WINDOW *header_win;
+	//WINDOW *sidebar_win;
+	WINDOW *text_area_win;
+	WINDOW *input_area_header_win;
+	WINDOW *input_area_win;
 
+	int exit_status = EXIT_SUCCESS;
 
-/* When a line is entered using the readline library, this function
-   gets called to handle the entered line. Implement the code to
-   handle the user requests in this function. The client handles the
-   server messages in the loop in main(). */
-void readline_callback(char *line)
-{
-        char buffer[256];
-        if (NULL == line) {
-                perror("did you just use ctrl+d?");
-                rl_callback_handler_remove();
-                signal_handler(SIGTERM);
-                return;
-        }
-        if (strlen(line) > 0) {
-                add_history(line);
-        }
-        if ((strncmp("/bye", line, 4) == 0) ||
-            (strncmp("/quit", line, 5) == 0)) {
-                rl_callback_handler_remove();
-                signal_handler(SIGTERM);
-                return;
-        }
-        if (strncmp("/game", line, 5) == 0) {
-                /* Skip whitespace */
-                int i = 4;
-                while (line[i] != '\0' && isspace(line[i])) { i++; }
-                if (line[i] == '\0') {
-                        write(STDOUT_FILENO, "Usage: /game username\n",
-                              29);
-                        fsync(STDOUT_FILENO);
-                        rl_redisplay();
-                        return;
-                }
-                /* Start game */
-                return;
-        }
-        if (strncmp("/join", line, 5) == 0) {
-                int i = 5;
-                /* Skip whitespace */
-                while (line[i] != '\0' && isspace(line[i])) { i++; }
-                if (line[i] == '\0') {
-                        write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
-                        fsync(STDOUT_FILENO);
-                        rl_redisplay();
-                        return;
-                }
-                char *chatroom = strdup(&(line[i]));
+	short origf, origb;
+	int draw_gui = 1;
+	int draw_text_area = 0;
+	int text_area_lines_count = 0;
+	
+	wchar_t bye_command[] = L"/bye";
+	wchar_t user_command[] = L"/user";
+	wchar_t space[] = L" ";
+	size_t bye_command_len = wcslen(bye_command);
+	size_t user_command_len = wcslen(user_command);
+	struct input_buffer user_input_buffer;
+	line_buffer_make(&user_input_buffer);
+	
+	// server variables
+	int server_fd;
+	int select_activity;
+	int select_timeout_usec = 20000; // 20th of a second
+	int ssl_error;
+	fd_set read_fds;
+	struct timeval select_timeout;
+	struct sockaddr_in server;
 
-                /* Process and send this information to the server. */
+	// start random numbers
+	srand(time(NULL));
 
-                /* Maybe update the prompt. */
-                free(prompt);
-                prompt = NULL; /* What should the new prompt look like? */
-		rl_set_prompt(prompt);
-                return;
-        }
-        if (strncmp("/list", line, 5) == 0) {
-                /* Query all available chat rooms */
-                return;
-        }
-        if (strncmp("/roll", line, 5) == 0) {
-                /* roll dice and declare winner. */
-                return;
-        }
-        if (strncmp("/say", line, 4) == 0) {
-                /* Skip whitespace */
-                int i = 4;
-                while (line[i] != '\0' && isspace(line[i])) { i++; }
-                if (line[i] == '\0') {
-                        write(STDOUT_FILENO, "Usage: /say username message\n",
-                              29);
-                        fsync(STDOUT_FILENO);
-                        rl_redisplay();
-                        return;
-                }
-                /* Skip whitespace */
-                int j = i+1;
-                while (line[j] != '\0' && isgraph(line[j])) { j++; }
-                if (line[j] == '\0') {
-                        write(STDOUT_FILENO, "Usage: /say username message\n",
-                              29);
-                        fsync(STDOUT_FILENO);
-                        rl_redisplay();
-                        return;
-                }
-                char *receiver = strndup(&(line[i]), j - i - 1);
-                char *message = strndup(&(line[j]), j - i - 1);
+	// time to establish a connection
+	server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	memset(&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    inet_pton(AF_INET, server_ip, &server.sin_addr);
+    server.sin_port = htons(server_port);
 
-                /* Send private message to receiver. */
+    int connect_res = connect(server_fd, (struct sockaddr *) &server, sizeof(server));
+    if (connect_res == -1) {
+    	printf("Unable to connect to server.\n");
+        g_critical("connecting to server failed");
+        exit(EXIT_FAILURE);
+    }
+    g_info("server port for server connection: %d", server_port);
 
-                return;
-        }
-        if (strncmp("/user", line, 5) == 0) {
-                int i = 5;
-                /* Skip whitespace */
-                while (line[i] != '\0' && isspace(line[i])) { i++; }
-                if (line[i] == '\0') {
-                        write(STDOUT_FILENO, "Usage: /user username\n", 22);
-                        fsync(STDOUT_FILENO);
-                        rl_redisplay();
-                        return;
-                }
-                char *new_user = strdup(&(line[i]));
-                char passwd[48];
-                getpasswd("Password: ", passwd, 48);
+    // begin setting up SSL
+    SSL_library_init(); // loads encryption and hash algs for SSL
+    SSL_load_error_strings(); // loads error strings for error reporting
 
-                /* Process and send this information to the server. */
+    const SSL_METHOD *ssl_method = SSLv23_client_method();
+    SSL_CTX *ssl_ctx = SSL_CTX_new(ssl_method);
+    SSL *ssl = SSL_new(ssl_ctx);
 
-                /* Maybe update the prompt. */
-                free(prompt);
-                prompt = NULL; /* What should the new prompt look like? */
-		rl_set_prompt(prompt);
-                return;
-        }
-        if (strncmp("/who", line, 4) == 0) {
-                /* Query all available users */
-                return;
-        }
-        /* Sent the buffer to the server. */
-        snprintf(buffer, 255, "Message: %s\n", line);
-        write(STDOUT_FILENO, buffer, strlen(buffer));
-        fsync(STDOUT_FILENO);
-}
+    // we create the BIO for the server connection
+    BIO *server_bio = BIO_new(BIO_s_socket());
+    BIO_set_fd(server_bio, server_fd, BIO_NOCLOSE);
+    SSL_set_bio(ssl, server_bio, server_bio);
 
-int main(int argc, char **argv)
-{
-        initialize_exitfd();
-        
-        /* Initialize OpenSSL */
-	SSL_library_init();
-	SSL_load_error_strings();
-	SSL_CTX *ssl_ctx = SSL_CTX_new(TLSv1_client_method());
+    ssl_error = SSL_connect(ssl);
 
-	/* TODO:
-	 * We may want to use a certificate file if we self sign the
-	 * certificates using SSL_use_certificate_file(). If available,
-	 * a private key can be loaded using
-	 * SSL_CTX_use_PrivateKey_file(). The use of private keys with
-	 * a server side key data base can be used to authenticate the
-	 * client.
-	 */
+    if(ssl_error != 1) {
+    	printf("Unable to established secure connection to server.\n");
+    	ssl_print_error(ssl_error);
+    	exit(EXIT_FAILURE);
+    }
 
-	server_ssl = SSL_new(ssl_ctx);
+    // set configuration for UI
+	initscr();
+	cbreak();
+	//curs_set(0);
+	start_color();
+	use_default_colors();
+	pair_content(0, &origf, &origb);
+	init_pair(1, COLOR_GREEN, origb);
+	init_pair(WARNING_PAIR, COLOR_RED, origb);
+	init_pair(HEADER_BG_PAIR, COLOR_GREEN, COLOR_GREEN);
+	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
+	init_pair(HEADER_FG_PAIR, COLOR_WHITE, COLOR_GREEN);
+	init_pair(SERVER_USER_PAIR, COLOR_GREEN, origb);
+	init_pair(OTHER_USER_PAIR, COLOR_WHITE, origb);
+	init_pair(CURRENT_USER_PAIR, COLOR_CYAN, origb);
+	noecho();
+	keypad(stdscr, TRUE);
 
-	/* Create and set up a listening socket. The sockets you
-	 * create here can be used in select calls, so do not forget
-	 * them.
-	 */
+	// create UI windows
+	header_win = newwin(1, COLS, 0, 0);
+	//sidebar_win = newwin(LINES - 1, SIDEBAR_WIDTH, 1, COLS - SIDEBAR_WIDTH);
+	// text_area_win = newwin(LINES - 4, COLS - SIDEBAR_WIDTH, 1, 0);
+	// input_area_header_win = newwin(1, COLS - SIDEBAR_WIDTH, LINES - 3, 0);
+	// input_area_win = newwin(2, COLS - SIDEBAR_WIDTH, LINES - 2, 0);
+	text_area_win = newwin(LINES - 4, COLS, 1, 0);
+	input_area_header_win = newwin(1, COLS, LINES - 3, 0);
+	input_area_win = newwin(2, COLS, LINES - 2, 0);
+	timeout(0);
+	intrflush(stdscr, 1);
 
-	/* Use the socket for the SSL connection. */
-	SSL_set_fd(server_ssl, server_fd);
+	// build the UI
+	if(draw_gui) {
+		draw_gui = 0;
+		gui_clear_all();
+		gui_create_header(header_win);
+		// future: would be cool to have sidebar display currently logged in users
+		// gui_create_siderbar(sidebar_win);
+		gui_create_text_area(text_area_win, text_area_lines);
+		gui_create_input_area_header(input_area_header_win);
+		gui_create_input_area(input_area_win, NULL);
+	}
 
-	/* Now we can create BIOs and use them instead of the socket.
-	 * The BIO is responsible for maintaining the state of the
-	 * encrypted connection and the actual encryption. Reads and
-	 * writes to sock_fd will insert unencrypted data into the
-	 * stream, which even may crash the server.
-	 */
+	// move the cursor into the start of the input area
+	wmove(input_area_win, 0, 0);
+	wrefresh(input_area_win);
 
-    /* Set up secure connection to the chatd server. */
+	BIO_set_nbio(server_bio, 1);
 
-    /* Read characters from the keyboard while waiting for input.
-     */
-    prompt = strdup("> ");
-    rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
-    for (;;) {
-    
-        fd_set rfds;
-		struct timeval timeout;
+	initialize_exit_fd();
 
-        /* You must change this. Keep exitfd[0] in the read set to
-           receive the message from the signal handler. Otherwise,
-           the chat client can break in terrible ways. */
-        FD_ZERO(&rfds);
-        FD_SET(STDIN_FILENO, &rfds);
-        FD_SET(exitfd[0], &rfds);
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-		
-        int r = select(exitfd[0] + 1, &rfds, NULL, NULL, &timeout);
-        if (r < 0) {
-            if (errno == EINTR) {
-                        /* This should either retry the call or
-                           exit the loop, depending on whether we
-                           received a SIGTERM. */
-                continue;
-            }
-            /* Not interrupted, maybe nothing we can do? */
-            perror("select()");
-            break;
-        }
+	while(TRUE) {
 
-        if (r == 0) {
-                write(STDOUT_FILENO, "No message?\n", 12);
-                fsync(STDOUT_FILENO);
-                /* Whenever you print out a message, call this
-                   to reprint the current input line. */
-	           rl_redisplay();
-                continue;
-        }
+		// select functionality
+		int server_bio_fd = BIO_get_fd(server_bio, NULL);
+		int highest_fd = exit_fd[0] > server_bio_fd ? exit_fd[0] : server_bio_fd;
+		FD_ZERO(&read_fds);
+		FD_SET(exit_fd[0], &read_fds);
+		FD_SET(server_bio_fd, &read_fds);
+		select_timeout.tv_sec = 0;
+		select_timeout.tv_usec = select_timeout_usec;
+		select_activity = select(highest_fd + 1, &read_fds, NULL, NULL, &select_timeout);
 
-        if (FD_ISSET(exitfd[0], &rfds)) {
-                /* We received a signal. */
+		// do we catch a signal?
+		if (FD_ISSET(exit_fd[0], &read_fds)) {
             int signum;
+
             for (;;) {
-                if (read(exitfd[0], &signum, sizeof(signum)) == -1) {
-                    if (errno = EAGAIN) {
+                if (read(exit_fd[0], &signum, sizeof(signum)) == -1) {
+                    if (errno == EAGAIN) {
                         break;
                     } else {
                         perror("read()");
@@ -340,22 +226,267 @@ int main(int argc, char **argv)
             }
 
             if (signum == SIGINT) {
-                    /* Don't do anything. */
+                
+                g_warning("we are exiting");
+                exit_status = EXIT_SUCCESS;
+                break;
+
             } else if (signum == SIGTERM) {
-                    /* Clean-up and exit. */
-                perror("sigterm exiting now");
+
+                g_warning("sigterm exiting now");
+                exit_status = EXIT_SUCCESS;
                 break;
             }
                     
         }
 
-        if (FD_ISSET(STDIN_FILENO, &rfds)) {
-            rl_callback_read_char();
+		// this is done to handle the case where select was not interrupted (ctrl+c) but returned an error.
+        if(errno != EINTR && select_activity < 0){
+            g_warning("select() error");
         }
 
-        /* Handle messages from the server here! */
+		if(FD_ISSET(server_bio_fd, &read_fds)) {
+
+			gboolean shutdown_ssl = FALSE;
+            gboolean connection_closed = FALSE;
+
+			wchar_t *recv_message = g_malloc(WCHAR_STR_MAX * sizeof(wchar_t));
+			memset(recv_message, 0, WCHAR_STR_MAX * sizeof(wchar_t));
+			int recv_len = SSL_read(ssl, recv_message, WCHAR_STR_MAX - 1);
+
+			if(recv_len <= 0) {
+                connection_closed = TRUE;
+            }
+
+            if(SSL_RECEIVED_SHUTDOWN == SSL_get_shutdown(ssl) || connection_closed) {
+                SSL_shutdown(ssl);
+                shutdown_ssl = TRUE;
+            }
+
+            if(shutdown_ssl || connection_closed) {
+
+            	g_free(recv_message);
+
+                shutdown(server_fd, SHUT_RDWR);
+                close(server_fd);
+
+                exit_status = EXIT_SUCCESS;
+                break;
+
+            } else {
+
+				recv_message[recv_len+1] = '\0';
+				text_area_append(text_area_lines_ref, recv_message, &text_area_lines_count, &draw_text_area);
+			}
+
+			//g_info("recv() received a message of length %d", (int) recv_len);
+		}
+
+		wchar_t user_line[WCHAR_STR_MAX];
+		int user_line_len = line_buffer_get_line_non_blocking(&user_input_buffer, user_line, WCHAR_STR_MAX);
+
+		if(user_line_len > 0) {
+
+			if(wcsncmp(bye_command, user_line, bye_command_len) == 0) {
+
+				SSL_shutdown(ssl);
+				shutdown(server_fd, SHUT_RDWR);
+                close(server_fd);
+
+				break;
+
+			} else if (wcsncmp(user_command, user_line, user_command_len) == 0) {
+
+				gui_create_input_area(input_area_win, NULL);
+				wrefresh(input_area_win);
+
+				wchar_t *state;
+				wchar_t *token = wcstok(user_line, L" ", &state);
+				int tokens = 1;
+				gboolean user_command_error = FALSE;
+
+				while(token != NULL) {
+
+					if(tokens >= 2) {
+						user_command_error = TRUE;
+						break;
+					}
+
+					token = wcstok(NULL, L" ", &state);
+					tokens++;
+
+					if(tokens == 2) {
+
+						wint_t password[61];
+						memset(password, 0, 61);
+						wget_wstr(input_area_win, password);
+						password[60] = '\0';
+						int password_input_length = wint_chars_len(password, 60);
+
+						if(password_input_length < 6 || password_input_length > 50) {
+
+							wchar_t *password_error_message = g_malloc(sizeof(wchar_t) * 58);
+							mbstowcs(password_error_message, "Passwords must be between 6 and 50 characters inclusively", 58);
+							password_error_message[57] = '\0';
+
+							text_area_append(text_area_lines_ref, password_error_message, &text_area_lines_count, &draw_text_area);
+
+						} else {
+
+							unsigned char hash[SHA256_DIGEST_LENGTH];
+							gchar hash_string[65];
+							wchar_t hash_string_wide[65];
+							SHA256_CTX sha256;
+	                        SHA256_Init(&sha256);
+
+	                        for(int i = 0; i < 20000; i++) {
+	                            SHA256_Update(&sha256, password, password_input_length * sizeof(wint_t));
+	                        }
+	                        SHA256_Final(hash, &sha256);
+
+	                        for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+                                sprintf(hash_string + (i * 2), "%02x", hash[i]);
+                            }
+                            hash_string[64] = 0;
+	                        mbstowcs(hash_string_wide, hash_string, 65);
+
+	                        // + 2 for spaces, +65 for hash with null terminator
+	                        int user_command_payload_len = sizeof(wchar_t) * (wcslen(user_command) + wcslen(token) + 2 + 65);
+	                        wchar_t *user_command_payload = g_malloc(user_command_payload_len);
+	                        memset(user_command_payload, 0, user_command_payload_len);
+	                        wcscat(user_command_payload, user_command);
+	                        wcscat(user_command_payload, space);
+	                        wcscat(user_command_payload, token);
+	                        wcscat(user_command_payload, space);
+	                        wcscat(user_command_payload, hash_string_wide);
+
+	                        //text_area_append(text_area_lines_ref, user_command_payload, &text_area_lines_count, &draw_text_area);
+	                        SSL_write(ssl, user_command_payload, user_command_payload_len);
+	                        g_free(user_command_payload);
+
+	                        g_free(ui_username);
+	                        wchar_t *username = g_malloc((wcslen(token) + 1) * sizeof(wchar_t));
+	                        memset(username, 0, (wcslen(token) + 1) * sizeof(wchar_t));
+	                        wcscat(username, token);
+	                        ui_username = username;
+                    	}
+
+                    	break;
+					}
+				}
+
+				if(user_command_error) {
+
+					wchar_t *register_error_message = g_malloc(sizeof(wchar_t) * 29);
+					mbstowcs(register_error_message, "Invalid registration command", 29);
+					register_error_message[28] = '\0';
+
+					text_area_append(text_area_lines_ref, register_error_message, &text_area_lines_count, &draw_text_area);
+
+				}
+
+			} else {
+
+				wchar_t *str = g_malloc(user_line_len * sizeof(wchar_t));
+				memcpy(str, user_line, user_line_len * sizeof(wchar_t));
+				SSL_write(ssl, str, user_line_len * sizeof(wchar_t));
+				g_free(str);
+
+			}
+
+		}
+
+		if(draw_text_area) {
+			gui_create_text_area(text_area_win, text_area_lines);
+			wrefresh(text_area_win);
+			draw_text_area = 0;
+		}
+
+		gui_create_input_area(input_area_win, &user_input_buffer);
+		wrefresh(input_area_win);
+	}
+
+	// time to cleanup
+	//BIO_vfree(server_bio);
+	SSL_free(ssl);
+	SSL_CTX_free(ssl_ctx);
+	g_slist_free_full(text_area_lines, g_free);
+	endwin();
+	exit(exit_status);
+
+	return 0;
+}
+
+// FUNCTION IMPLEMENTATIONS
+void signal_handler(int signum) {
+    int _errno = errno;
+
+    if (write(exit_fd[1], &signum, sizeof(signum)) == -1 && errno != EAGAIN) {
+        abort();
     }
-        
-        /* replace by code to shutdown the connection and exit
-           the program. */
+
+    fsync(exit_fd[1]);
+    errno = _errno;
+}
+
+void initialize_exit_fd(void) {
+
+    // establish the self pipe for signal handling
+    if (pipe(exit_fd) == -1) {
+        perror("pipe()");
+        exit(EXIT_FAILURE);
+    }
+
+    // make read and write ends of pipe nonblocking
+    int flags;        
+    flags = fcntl(exit_fd[0], F_GETFL);
+    if (flags == -1) {
+        perror("fcntl-F_GETFL");
+        exit(EXIT_FAILURE);
+    }
+    // Make read end nonblocking
+    flags |= O_NONBLOCK;
+    if (fcntl(exit_fd[0], F_SETFL, flags) == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+    flags = fcntl(exit_fd[1], F_GETFL);
+    if (flags == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+    // make write end nonblocking
+    flags |= O_NONBLOCK;
+    if (fcntl(exit_fd[1], F_SETFL, flags) == -1) {
+        perror("fcntl-F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+
+    // set the signal handler
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART; // restart interrupted reads
+    sa.sa_handler = signal_handler;
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }       
+}
+
+void text_area_append(GSList **text_area_lines_ref, wchar_t* message, int *text_area_lines_count, int *draw_text_area) {
+
+	(*text_area_lines_ref) = g_slist_append(*text_area_lines_ref, message);
+	(*text_area_lines_count)++;
+	(*draw_text_area) = 1;
+
+	if(BLABBR_LINES_MAX < *text_area_lines_count) {
+
+		(*text_area_lines_count)--;
+		*text_area_lines_ref = g_slist_delete_link(*text_area_lines_ref, *text_area_lines_ref);
+	}
+
 }

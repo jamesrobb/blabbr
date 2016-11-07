@@ -196,7 +196,6 @@ int main(int argc, char **argv) {
 
         select_timeout.tv_sec = 1;
         select_activity = select(incoming_sd_max + 1, &incoming_fds, NULL, NULL, &select_timeout);
-        g_info("tick!");
 
         // do we catch a signal?
         if (FD_ISSET(exit_fd[0], &incoming_fds)) {
