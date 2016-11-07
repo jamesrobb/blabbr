@@ -81,10 +81,13 @@ void client_log_all_handler_cb (G_GNUC_UNUSED const gchar *log_domain,
 
 
 	// we add log message to text area
-	wchar_t *w_error = malloc(sizeof(wchar_t) * (error_string->len + 1));
-	mbstowcs(w_error, error_string->str, error_string->len + 1);
-	GSList **text_area_lines = (GSList **)user_data;
-	*text_area_lines = g_slist_append(*text_area_lines, w_error);
+	if(user_data != NULL) {
+		wchar_t *w_error = malloc(sizeof(wchar_t) * (error_string->len + 1));
+		mbstowcs(w_error, error_string->str, error_string->len + 1);
+
+		GSList **text_area_lines = (GSList **)user_data;
+		*text_area_lines = g_slist_append(*text_area_lines, w_error);
+	}
 
 	g_string_append(error_string, "\n");
 	write_to_log_file(CLIENT_DEBUG_LOG_FILE_LOCATION, error_string);
