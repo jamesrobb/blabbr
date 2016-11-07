@@ -665,7 +665,7 @@ int main(int argc, char **argv) {
                             }
                             // check wether working client is already in a game
                             if(working_client_connection->in_game == TRUE){
-                                wchar_t *command_say_text = L"SERVER You user is already in a game type '/giveup' to give up";
+                                wchar_t *command_say_text = L"SERVER You are already in a game type '/giveup' to give up";
                                 int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t);
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                                 continue;
@@ -684,11 +684,10 @@ int main(int argc, char **argv) {
                                 // setup both users for a diceduel
                                 wchar_t *challenger_username = g_malloc(sizeof(wchar_t) * (wcslen(working_client_connection->username) + 1));
                                 wcscpy(challenger_username, working_client_connection->username);
-                                wchar_t *challenged_username = g_malloc(sizeof(wchar_t) * (wcslen(to_send_to->username) + 1));
-                                wcscpy(challenged_username, to_send_to->username);
-                                working_client_connection->current_opponent = challenged_username;
                                 to_send_to->current_opponent = challenger_username;
                                 working_client_connection->in_game = TRUE;
+                                to_send_to->in_game = TRUE;
+
                                 int bytes_needed = (wcslen(working_client_connection->username) + 109)* sizeof(wchar_t);    // | has challenged you to a dice game type /accept to 
                                 wchar_t *message_to_send = g_malloc(bytes_needed);                                          // take him/her on or /decline to decline his/hers game| = 107 characters
                                 memset(message_to_send, 0, bytes_needed);
@@ -700,46 +699,64 @@ int main(int argc, char **argv) {
                             else {
                                 wchar_t *command_say_text = L"SERVER Username not found use '/who' to see a list of usernames";
                                 int bytes_needed = wcslen(command_say_text) * sizeof(wchar_t) + 4; // plus 4 for null terminator
-                            
                                 SSL_write(working_client_connection->ssl, command_say_text, bytes_needed);
                             }
                         }
 
                         if(wcscmp(accept_command, data_buffer) == 0) {
                             command_entered = TRUE;
-                            wchar_t *challenger = working_client_connection->current_opponent;
-                            client_connection *challenger_client_conn = g_tree_lookup(username_clientconns, challenger);
-                            if(challenger_client_conn == NULL) {
+
+                            wchar_t *opponent = working_client_connection->current_opponent;
+                            if(opponent == NULL || working_client_connection->in_game == FALSE) {
+                                wchar_t *challenger_error_text = L"SERVER You have no game to accept";
+                                int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
+                                continue;
+                            }
+                            client_connection *opponent_client_conn = g_tree_lookup(username_clientconns, opponent);
+                            if(opponent_client_conn == NULL) {
                                 g_free(working_client_connection->current_opponent);
                                 working_client_connection->current_opponent = NULL;
 
-                                wchar_t *challenger_error_text = L"SERVER Challenger is no longer available";
+                                wchar_t *challenger_error_text = L"SERVER Opponent is no longer available";
                                 int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
                                 SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
                             }
                             else {
-                                working_client_connection->in_game = TRUE;
-                                challenger_client_conn->in_game = TRUE;
+                                wchar_t *opponent_username = g_malloc(sizeof(wchar_t) * (wcslen(working_client_connection->username) + 1));
+                                wcscpy(opponent_username, working_client_connection->username);
+                                opponent_client_conn->current_opponent = opponent_username;
 
                                 // send working client connection notification that he is now in a game
                                 wchar_t *started_text = L"SERVER Your game has started type '/roll' to throw your dice";
                                 int bytes_needed = (wcslen(started_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
                                 SSL_write(working_client_connection->ssl, started_text, bytes_needed);
 
-                                // send challenger a notification that working client connection has accepted.
+                                // send opponent a notification that working client connection has accepted.
                                 wchar_t *accepted_text = L"SERVER Your game has been accepted type '/roll' to throw your dice";
                                 int accepted_bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
-                                SSL_write(challenger_client_conn->ssl, accepted_text, accepted_bytes_needed);
+                                SSL_write(opponent_client_conn->ssl, accepted_text, accepted_bytes_needed);
                             }
                         }
 
                         if(wcscmp(decline_command, data_buffer) == 0) {
                             command_entered = TRUE;
-                            wchar_t *challenger = working_client_connection->current_opponent;
-                            client_connection *challenger_client_conn = g_tree_lookup(username_clientconns, challenger);
-                            if(challenger_client_conn == NULL) {
+
+                            wchar_t *opponent = working_client_connection->current_opponent;
+                            if(opponent == NULL || working_client_connection->in_game == FALSE) {
+                                wchar_t *challenger_error_text = L"SERVER You have no game to accept";
+                                int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                SSL_write(working_client_connection->ssl, challenger_error_text, bytes_needed);
+                                continue;
+                            }
+
+                            client_connection *opponent_client_conn = g_tree_lookup(username_clientconns, opponent);
+                            if(opponent_client_conn == NULL) {
                                 g_free(working_client_connection->current_opponent);
                                 working_client_connection->current_opponent = NULL;
+
+                                working_client_connection->in_game = FALSE;
+                                working_client_connection->game_score = 0;
 
                                 wchar_t *challenger_error_text = L"SERVER Challenger is no longer available";
                                 int bytes_needed = (wcslen(challenger_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
@@ -747,23 +764,25 @@ int main(int argc, char **argv) {
                             }
                             else {
                                 working_client_connection->in_game = FALSE;
-                                challenger_client_conn->in_game = FALSE;
+                                opponent_client_conn->in_game = FALSE;
+                                working_client_connection->game_score = 0;
+                                opponent_client_conn->game_score = 0;
 
                                 g_free(working_client_connection->current_opponent);
                                 working_client_connection->current_opponent = NULL;
 
-                                g_free(challenger_client_conn->current_opponent);
-                                challenger_client_conn->current_opponent = NULL;
+                                g_free(opponent_client_conn->current_opponent);
+                                opponent_client_conn->current_opponent = NULL;
 
                                 // send working client connection notification that he is now in a game
                                 wchar_t *started_text = L"SERVER You have declined the game";
                                 int bytes_needed = (wcslen(started_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
                                 SSL_write(working_client_connection->ssl, started_text, bytes_needed);
 
-                                // send challenger a notification that working client connection has accepted.
+                                // send opponent a notification that working client connection has accepted.
                                 wchar_t *accepted_text = L"SERVER Your game has been declined";
                                 int accepted_bytes_needed = (wcslen(accepted_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
-                                SSL_write(challenger_client_conn->ssl, accepted_text, accepted_bytes_needed);
+                                SSL_write(opponent_client_conn->ssl, accepted_text, accepted_bytes_needed);
                             }
                         }
 
@@ -794,20 +813,75 @@ int main(int argc, char **argv) {
                                         SSL_write(working_client_connection->ssl, opponent_error_text, bytes_needed);
                                     }
                                     else {
-                                        int dice_roll = (int) floor(drand48() * 6.0) + 1;
-                                        dice_roll = dice_roll + (int) floor(drand48() * 6.0) + 1; // call it twice for more randomness
+                                        if(working_client_connection->game_score != 0) {
+                                            wchar_t *opponent_error_text = L"SERVER You've already rolled for this game";
+                                            int bytes_needed = (wcslen(opponent_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                            SSL_write(working_client_connection->ssl, opponent_error_text, bytes_needed);
+                                        }
+                                        else {
+                                            int dice_roll = (int) floor(drand48() * 11.0) + 2;
+                                            working_client_connection->game_score = dice_roll;
+                                            wchar_t dice_sum[3]; 
+                                            swprintf(dice_sum, 3, L"%d", dice_roll);
+                                            
+                                            int bytes_needed = (wcslen(working_client_connection->username) + 17)* sizeof(wchar_t); // | has rolled a | + atmost 2 numbers + null term
+                                            wchar_t *message_to_send = g_malloc(bytes_needed);
+                                            memset(message_to_send, 0, bytes_needed);
+                                            wcscat(message_to_send, working_client_connection->username);
+                                            wcscat(message_to_send, L" has rolled a ");
+                                            wcscat(message_to_send, dice_sum);
+                                            SSL_write(opponent_client_conn->ssl, message_to_send, bytes_needed);
+                                            SSL_write(working_client_connection->ssl, message_to_send, bytes_needed);
+                                            g_free(message_to_send);
+                                            if(opponent_client_conn->game_score != 0) {
+                                                gboolean draw = FALSE;
+                                                gboolean opponent_won = FALSE;
+                                                int end_bytes_needed = (26)* sizeof(wchar_t); // |SERVER | + username + | has won the game!| null term
+                                                if(opponent_client_conn->game_score > working_client_connection->game_score) {
+                                                    end_bytes_needed += wcslen(opponent_client_conn->username) * sizeof(wchar_t);
+                                                    opponent_won = TRUE;
+                                                }
+                                                else if (opponent_client_conn->game_score < working_client_connection->game_score) {
+                                                    end_bytes_needed += wcslen(working_client_connection->username) * sizeof(wchar_t);
+                                                }
+                                                else {
+                                                    draw = TRUE;
+                                                }
 
-                                        wchar_t dice_sum[3]; 
-                                        swprintf(dice_sum, 3, L"%d", dice_roll);
+                                                if(draw == TRUE) {
+                                                    wchar_t *opponent_error_text = L"SERVER The game ended in a draw";
+                                                    int bytes_needed = (wcslen(opponent_error_text) + 1) * sizeof(wchar_t); // plus 1 for null terminator
+                                                    SSL_write(working_client_connection->ssl, opponent_error_text, bytes_needed);
+                                                    SSL_write(opponent_client_conn->ssl, opponent_error_text, bytes_needed);
+                                                }
+                                                else {
+                                                    wchar_t *end_message_to_send = g_malloc(end_bytes_needed);
+                                                    memset(end_message_to_send, 0, end_bytes_needed);
+                                                    wcscat(end_message_to_send, L"SERVER ");
+                                                    if(opponent_won) {
+                                                        wcscat(end_message_to_send, opponent_client_conn->username);
+                                                    }
+                                                    else {
+                                                        wcscat(end_message_to_send, working_client_connection->username);
+                                                    }
+                                                    wcscat(end_message_to_send, L" has won the game!");
+                                                    SSL_write(opponent_client_conn->ssl, end_message_to_send, end_bytes_needed);
+                                                    SSL_write(working_client_connection->ssl, end_message_to_send, end_bytes_needed);
+                                                    g_free(end_message_to_send);
+                                                }
+                                                // cleaning up so that users can play again later
+                                                working_client_connection->in_game = FALSE;
+                                                opponent_client_conn->in_game = FALSE;
+                                                working_client_connection->game_score = 0;
+                                                opponent_client_conn->game_score = 0;
+                                                g_free(working_client_connection->current_opponent);
+                                                working_client_connection->current_opponent = NULL;
+                                                g_free(opponent_client_conn->current_opponent);
+                                                opponent_client_conn->current_opponent = NULL;
+                                            }
+                                            
+                                        }
                                         
-                                        int bytes_needed = (wcslen(working_client_connection->username) + 17)* sizeof(wchar_t); // | has rolled a | + atmost 2 numbers + null term
-                                        wchar_t *message_to_send = g_malloc(bytes_needed);
-                                        memset(message_to_send, 0, bytes_needed);
-                                        wcscat(message_to_send, working_client_connection->username);
-                                        wcscat(message_to_send, L" has rolled a ");
-                                        wcscat(message_to_send, dice_sum);
-                                        SSL_write(opponent_client_conn->ssl, message_to_send, bytes_needed);
-                                        g_free(message_to_send);
                                     }
                                 }
                             }
