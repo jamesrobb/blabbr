@@ -135,13 +135,13 @@ This is the `/roll` command described in [3.1.6](#316-game-command).
 
 This list all client commands. However, as server MAY choose not to show sub-commands, like `/accept`, etc.
 
-### 4 Text Messages
+## 4 Text Messages
 
 Text messages are messages that are intended for display. They are of the form described in [2.1](#21-message-structure), that is, a username that is followed space, and then a unicode string. The username is that of the author of the message.
 
 For text messages sent from the server to a client to indicate direct interactions with the server (i.e. authentication, list of available commands), the username MUST be "SERVER".
 
-### 5 Build Requirements
+## 5 Build Requirements
 
 The packages needed to build Blabbr are openssl, ncursesw, and glib.
 
