@@ -10,6 +10,11 @@ The Blabbr protocol is intended to be simple by nature. Messages are sent betwee
 
 Blabbr works on the principal that there is a central server of which clients connect to in order to communicate with each other. The server is responsible for receiving messages from clients and then sending the appropriate messages to the appropriate clients.
 
+Here is a screenshot of the client:
+
+![Blabbr Client](screenshot.png)
+
+
 ## 2 Messages
 
 ### 2.1 Message Structure
