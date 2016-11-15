@@ -1,11 +1,3 @@
-/* A TCP echo server with timeouts.
- *
- * Note that you will not need to use select and the timeout for a
- * tftp server. However, select is also useful if you want to receive
- * from multiple sockets at the same time. Read the documentation for
- * select on how to do this (Hint: Iterate with FD_ISSET()).
- */
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <math.h>
